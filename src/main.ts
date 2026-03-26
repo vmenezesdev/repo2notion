@@ -10,7 +10,7 @@ import { MigrationOptions, MigrationResult, RepoDirectory, RepoNode } from "./ty
 import { scanRepository } from "./scan";
 import { clearIntermediateResults, saveIntermediateResult } from "./util";
 import { clear } from "node:console";
-import { collectFiles, removeLfsPaths } from "./extract";
+import { collectFiles, removeGitPaths, removeLfsPaths } from "./extract";
 import { inferMetadata } from "./enrich";
 
 
@@ -34,7 +34,7 @@ if (!targetDir) {
 // migrateRepo: RepoPath Config -> MigrationResult
 async function migrateRepo(rootPath: string, _options: MigrationOptions): Promise<MigrationResult> {
     const repoTree = await scanRepository(rootPath);
-    const files = removeLfsPaths(collectFiles(repoTree));
+    const files = removeGitPaths(removeLfsPaths(collectFiles(repoTree)));
     const recordCandidates = files.map((file) => inferMetadata(file)).filter((candidate) => candidate !== null);
 
     await clearIntermediateResults(
