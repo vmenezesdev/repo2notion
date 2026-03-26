@@ -88,7 +88,7 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "PUD Calculo I.doc",
         "doc",
     );
-    assert.equal(normalizeTitle(pudFile), "Calculo I - Plano de Ensino");
+    assert.equal(normalizeTitle(pudFile), "CA - Plano de Ensino");
 
     const provaImagem = makeFile(
         "/S01/CA - Calculo/2018.1 - PH/N2/N2 prova 1.jpeg",
@@ -96,6 +96,38 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "jpeg",
     );
     assert.equal(normalizeTitle(provaImagem), "Prova N2 (Parte 01)");
+});
+
+test("nao captura subpastas tecnicas como disciplina", () => {
+    const designPatterns = makeFile(
+        "/S05/PP - Padroes de Projeto/Python/abstract_factory/main.py",
+        "main.py",
+        "py",
+    );
+    assert.equal(inferDisciplina(designPatterns), "Padrões de Projeto");
+
+    const architecture = makeFile(
+        "/S03/AC - Arquitetura de Computadores/Arm9/DDI0201D.pdf",
+        "DDI0201D.pdf",
+        "pdf",
+    );
+    assert.equal(inferDisciplina(architecture), "Arquitetura de Computadores");
+
+    const electronics = makeFile(
+        "/S01/ED - Eletronica Digital/4. Relogio/quartus/relogio.bdf",
+        "relogio.bdf",
+        "bdf",
+    );
+    assert.equal(inferDisciplina(electronics), "Eletrônica Digital");
+});
+
+test("remove ordinal pendurado ao limpar prefixo numerico", () => {
+    const file = makeFile(
+        "/S01/CA - Calculo I/2018.1 - PH/553670-1ª_-_Definicao_de_derivadas_e_retas_tangentes.pdf",
+        "553670-1ª_-_Definicao_de_derivadas_e_retas_tangentes.pdf",
+        "pdf",
+    );
+    assert.equal(normalizeTitle(file), "Definicao de derivadas e retas tangentes");
 });
 
 test("nao interpreta timestamp como parte", () => {
@@ -226,6 +258,11 @@ test("captura rotulos de avaliacao com parcial e nota decimal", () => {
 
     const af = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AF Ultimate.pdf", "AF Ultimate.pdf", "pdf"));
     assert.ok(af.includes("AF"));
+});
+
+test("nao marca AF apenas por palavra final fora de contexto de prova", () => {
+    const tags = inferTags(makeFile("/S01/IP - Introducao a Programacao/2014.2 - JB/cfinal.html", "cfinal.html", "html"));
+    assert.ok(!tags.includes("AF"));
 });
 
 test("reconhece segunda chamada no titulo e nas tags", () => {
@@ -608,7 +645,7 @@ test("trata readme de raiz e src como ruido", () => {
 
 test("limpa codigos e redundancia em titulo de PUD", () => {
     const file = makeFile("/Documentos/PUDS/S01/CA - Calculo I/1916473-O PUD Calculo I.pdf", "1916473-O PUD Calculo I.pdf", "pdf");
-    assert.equal(normalizeTitle(file), "Calculo I - Plano de Ensino");
+    assert.equal(normalizeTitle(file), "CA - Plano de Ensino");
 });
 
 test("preserva numero significativo apos prefixo numerico de upload", () => {

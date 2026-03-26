@@ -269,7 +269,65 @@ const GENERIC_CONTEXT_FOLDERS = new Set([
     "imgs",
     "asset",
     "assets",
+    "python",
+    "java",
+    "quartus",
+    "arm9",
+    "arm7",
+    "proteus",
+    "matlab",
+    "simulacao",
+    "simulação",
 ]);
+
+const TECHNICAL_CONTEXT_FOLDERS = new Set([
+    "python",
+    "java",
+    "quartus",
+    "proteus",
+    "matlab",
+    "simulacao",
+    "simulação",
+    "platformio",
+    "arduino ide",
+    "venv",
+    "node modules",
+    "abstract factory",
+    "factory",
+    "adapter",
+    "observer",
+    "strategy",
+    "decorator",
+    "singleton",
+    "builder",
+    "prototype",
+    "command",
+]);
+
+function isTechnicalContextFolder(part: string): boolean {
+    const comparable = normalizeComparable(part);
+    if (!comparable) {
+        return false;
+    }
+
+    if (TECHNICAL_CONTEXT_FOLDERS.has(comparable)) {
+        return true;
+    }
+
+    if (/^arm\d{1,2}$/i.test(comparable)) {
+        return true;
+    }
+
+    if (/(^|\s)(?:factory|adapter|observer|strategy|decorator|singleton|builder|prototype|command)(?:\s|$)/i.test(comparable)) {
+        return true;
+    }
+
+    if (/^(?:python|java|quartus|proteus|matlab)\b/i.test(comparable)) {
+        return true;
+    }
+
+    return false;
+}
 
 const TIPO_PATTERNS = {
     prova: [
@@ -993,6 +1051,7 @@ function inferDisciplinaFromRepositoryRoot(path: unknown): string {
     if (
         IGNORED_SUBJECT_FOLDERS.has(normalizedRoot) ||
         TOPIC_SUBJECT_FOLDERS.has(normalizedRoot) ||
+        isTechnicalContextFolder(repositoryRoot) ||
         isNumberedTopicFolder(repositoryRoot) ||
         isLikelyProfessorFolder(repositoryRoot)
     ) {
@@ -1031,12 +1090,14 @@ function isGarbageIdLikeName(nameWithoutExt: string): boolean {
         return false;
     }
 
-    // BUG FIX #4: Check for dates first before marking as garbage
+    const comparable = normalizeComparable(normalized);
+
+    // Timestamp-only camera names should still be treated as garbage IDs.
     if (isLikelyDate(nameWithoutExt)) {
-        return false;
+        const cameraTimestampLike = /^(?:p|img|dsc|photo|whatsapp|screenshot|snapshot|scan|captura|pxl)[\s._-]*\d+/i.test(comparable);
+        return cameraTimestampLike;
     }
 
-    const comparable = normalizeComparable(normalized);
     const hasAcademicKeyword = /\b(?:prova|avaliac(?:ao|oes)|lista|listagem|exerc(?:icio|icios)|quest(?:ao|oes)|atividade|trabalho|projeto|gabarito|resoluc(?:ao|oes)|pud|plano\s+de\s+ensino|simulado|n[1-4]|av[1-4]|ap[1-4]|p[1-4])\b/.test(comparable);
     const hasKeywordWithShortNumber = /\b(?:prova|lista|listagem|quest(?:ao|oes)|exerc(?:icio|icios)|atividade|trabalho|projeto|n|av|ap|p)\s*[-_ ]?\d{1,2}\b/.test(comparable);
     const hasLongNumericPrefixWithMeaningfulTail = /^\d{5,}\s*[-_. ]\s*[a-z]/i.test(comparable) && hasAcademicKeyword;
@@ -1115,6 +1176,7 @@ function getSubjectPart(path: unknown): string {
         const isIgnoredFolder =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
             TOPIC_SUBJECT_FOLDERS.has(comparable) ||
+            isTechnicalContextFolder(part) ||
             isTopicLikeFolder ||
             isGenericContextFolder ||
             isNumberedTopicFolder(part) ||
@@ -1364,7 +1426,7 @@ function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefin
     const semester = inferSemester(file);
     const tipo = inferTipo(file);
     const containerContextLabel = getContainerContextLabel(file?.path);
-    const isGenericCaptureName = /^(?:img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
+    const isGenericCaptureName = /^(?:p|img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
     if (disciplina && tipo === "Prova" && isGenericCaptureName) {
         const suffix = semester ? ` - ${semester}` : "";
         return `Prova - ${disciplina}${suffix} (Imagem)`;
@@ -1602,7 +1664,11 @@ function getAssessmentLabel(nameWithoutExt: string): string {
         return `AV${provaNumberMatch[1]}`;
     }
 
-    if (text.includes("final") || /\baf\b/i.test(text)) {
+    if (/\baf\b/i.test(text)) {
+        return "AF";
+    }
+
+    if (/\b(?:prova|avaliacao|avaliac[aã]o|exam|exame)\s+final\b/i.test(text) || /\bfinal\s+(?:exam|exame|prova)\b/i.test(text)) {
         return "AF";
     }
 
@@ -1824,11 +1890,6 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .trim();
         const target = pudSubject || subject;
         const pudSigla = subjectSigla || getResolvedSiglaFromDisciplina(target);
-        const normalizedTarget = normalizeComparable(target);
-        const isCalculoPud = pudSigla === "CA" && normalizedTarget.startsWith("calculo");
-        if (isCalculoPud && target) {
-            return `${normalizeText(target)} - Plano de Ensino`;
-        }
         if (pudSigla) {
             return `${pudSigla} - Plano de Ensino`;
         }
@@ -1836,6 +1897,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     let cleanedName = normalizeText(nameWithoutExt)
+        .replace(/^\d{5,}\s*[-–—_.]\s*\d+(?:ª|º|°)\b\s*[-–—_.]*\s*/i, "")
+        .replace(/^\d{5,}\s*[-–—_.]\s*\d+\s*(?:a|o)\b\s*[-–—_.]*\s*/i, "")
+        .replace(/^\d+(?:ª|º|°)\b\s*[-–—_.]*\s*/i, "")
         .replace(/^\d{5,}(?:\s*[-–—_.]\s*\d+)?\s*[-–—_.]*\s*(?=[A-Za-zÀ-ÿ])/i, "")
         .replace(/^\d{5,}[._\-\s]*/, "")
         .replace(/\b\d{7,}\b/g, "")
@@ -2059,6 +2123,13 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     if (shouldUseGarbageFallback) {
         const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
+        const hasExplicitCameraPrefix = /^(?:img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/i.test(normalizedOriginalName);
+        if (tipo === "Prova" && isImage && displaySubject && hasExplicitCameraPrefix) {
+            if (semester) {
+                return `Prova - ${displaySubject} - ${semester} (Imagem)`;
+            }
+            return `Prova - ${displaySubject} (Imagem)`;
+        }
         const contextualTipo = inferGenericTitleTypeLabel(tipo);
         if (displaySubject) {
             const semesterSuffix = semester ? ` (${semester})` : "";
@@ -2080,7 +2151,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     if (tipo === "Prova" && isImage) {
-        const isGenericCaptureName = /^(?:img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
+        const isGenericCaptureName = /^(?:p|img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
         if (isGenericCaptureName) {
             const contextual = [subject && subject !== "Geral" ? subject : subjectSigla, semester].filter(Boolean).join(" - ");
             if (contextual) {
@@ -2467,6 +2538,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const isIgnored =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
             TOPIC_SUBJECT_FOLDERS.has(comparable) ||
+            isTechnicalContextFolder(part) ||
             isTopicLikeFolder ||
             isGenericContextFolder ||
             isNumberedTopicFolder(part) ||
