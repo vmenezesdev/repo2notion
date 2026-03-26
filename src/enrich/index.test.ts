@@ -32,6 +32,10 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S05/EI - Eletronica Industrial/2021.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Eletrônica Industrial");
     assert.equal(inferDisciplina(makeFile("/S01/MCT - Metodologia Cientifica/2022.1 - PH/Trabalho.docx", "Trabalho.docx", "docx")), "Metodologia Científica");
     assert.equal(inferDisciplina(makeFile("/S08/VC - Visao Computacional/2023.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Visão Computacional");
+    assert.equal(inferDisciplina(makeFile("/S07/IHC - Interacao Humano Computador/2023.2 - PH/Trabalho.pdf", "Trabalho.pdf", "pdf")), "Interação Humano Computador");
+    assert.equal(inferDisciplina(makeFile("/S08/PDI - Processamento Digital de Imagens/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Processamento Digital de Imagens");
+    assert.equal(inferDisciplina(makeFile("/S10/TGI - Trabalho de Graduacao Interdisciplinar/2024.1 - PH/TGI.pdf", "TGI.pdf", "pdf")), "Trabalho de Graduação Interdisciplinar");
+    assert.equal(inferDisciplina(makeFile("/S02/PS - Projeto Social/2024.1 - PH/Relatorio.pdf", "Relatorio.pdf", "pdf")), "Projeto Social");
 });
 
 test("ignora pastas genericas na inferencia de disciplina", () => {
@@ -120,7 +124,7 @@ test("normaliza unicode decomposto na inferencia de disciplina", () => {
 
 test("captura professor com sigla curta", () => {
     const tags = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AP1.pdf", "AP1.pdf", "pdf"));
-    assert.ok(tags.includes("JB"));
+    assert.ok(tags.includes("João Batista Bezerra Frota"));
 });
 
 test("captura professor quando pasta vem apos ano semestre", () => {
@@ -131,6 +135,22 @@ test("captura professor quando pasta vem apos ano semestre", () => {
 test("captura professor composto em pasta ano-semestre", () => {
     const tags = inferTags(makeFile("/S02/ED - Eletronica Digital/2015.2 - Joao Gabriel/N1.pdf", "N1.pdf", "pdf"));
     assert.ok(tags.includes("JOAO GABRIEL"));
+});
+
+test("nao mistura ricardo rodriges com ricardo taveira", () => {
+    const tagsRodriges = inferTags(makeFile("/S04/SD - Sistemas Distribuidos/2020.2 - Ricardo Rodriges/AP1.pdf", "AP1.pdf", "pdf"));
+    assert.ok(tagsRodriges.includes("Ricardo Rodriges"));
+    assert.ok(!tagsRodriges.includes("Ricardo Duarte Taveira"));
+
+    const tagsTaveira = inferTags(makeFile("/S04/SD - Sistemas Distribuidos/2020.2 - Ricardo Taveira/AP1.pdf", "AP1.pdf", "pdf"));
+    assert.ok(tagsTaveira.includes("Ricardo Duarte Taveira"));
+});
+
+test("desambigua ED por professor no caminho", () => {
+    const edDigital = makeFile("/S03/ED/2022.1 - JB/AP1.pdf", "AP1.pdf", "pdf");
+    const edEstrutura = makeFile("/S01/ED/2022.1 - Alisson/AP1.pdf", "AP1.pdf", "pdf");
+    assert.equal(inferDisciplina(edDigital), "Eletrônica Digital");
+    assert.equal(inferDisciplina(edEstrutura), "Estrutura de Dados");
 });
 
 test("prioriza tipo prova sobre documentacao", () => {
@@ -212,6 +232,11 @@ test("normaliza path com barras duplas em inferMetadata", () => {
     const metadata = inferMetadata(file);
     assert.notEqual(metadata, null);
     assert.equal(metadata?.sourcePath, "../provas/S01/CA - Calculo/2018.1 - PH/AP1.pdf");
+});
+
+test("sequencia de imagem curta usa contexto da disciplina", () => {
+    const file = makeFile("/S01/ED - Eletronica Digital/2019.1 - JB/VS01_01.jpg", "VS01_01.jpg", "jpg");
+    assert.equal(normalizeTitle(file), "Eletrônica Digital - Parte 01");
 });
 
 test("adiciona tag projeto para arquivos de proteus", () => {

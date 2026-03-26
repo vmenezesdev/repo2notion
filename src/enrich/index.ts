@@ -32,6 +32,15 @@ const NOISE_EXTENSIONS = new Set([
     "tmp",
     "temp",
     "bak",
+    "hex",
+    "cof",
+    "map",
+    "lst",
+    "pjt",
+    "sym",
+    "tre",
+    "o",
+    "pdsbak",
     "old",
     "orig",
     "swp",
@@ -40,6 +49,8 @@ const NOISE_EXTENSIONS = new Set([
     "pack",
     "rev",
 ]);
+
+const COMPILED_ARTIFACT_EXTENSIONS = new Set(["hex", "map", "o", "lst", "pdsbak"]);
 
 const SEMESTER_REGEXES = [
     /\b((?:19|20)\d{2})[._\-\s]([12])\b/,
@@ -88,6 +99,8 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     PDS: "Processamento Digital de Sinais",
     EG: "Empreendedorismo e Gestão",
     VC: "Visão Computacional",
+    IHC: "Interação Humano Computador",
+    PDI: "Processamento Digital de Imagens",
     SE: "Sistemas Embarcados",
     EDO: "Equações Diferenciais",
     EA: "Eletrônica Analógica",
@@ -97,8 +110,17 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     GP: "Gerenciamento de Projetos",
     SM: "Sistemas Multimídia",
     PT: "Produção Textual",
+    TGI: "Trabalho de Graduação Interdisciplinar",
+    PS: "Projeto Social",
     TCC: "Trabalho de Conclusão de Curso",
     BEPID: "BEPID Apple",
+};
+
+const DISCIPLINA_BY_SIGLA_AND_SEMESTER: Record<string, Record<number, string>> = {
+    ED: {
+        1: "Eletrônica Digital",
+        3: "Estrutura de Dados",
+    },
 };
 
 const IGNORED_SUBJECT_FOLDERS = new Set([
@@ -175,6 +197,41 @@ const TECHNICAL_SIGLAS = new Set([
     "BD",
     "LP",
 ]);
+
+const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
+    JB: "João Batista Bezerra Frota",
+    "JOAO BATISTA": "João Batista Bezerra Frota",
+    BENTO: "José Bento de Freitas",
+    AJALMAR: "Ajalmar Rêgo da Rocha Neto",
+    ANAXAGORAS: "Anaxágoras Maia Girão",
+    PARENTE: "Fernando Parente Garcia",
+    GLAUBER: "Glauber Ferreira Cintra",
+    CIDCLEY: "Cidcley Teixeira de Souza",
+    HAIRON: "Carlos Hairon Ribeiro Gonçalves",
+    "CESAR OLAVO": "Cesar Olavo de Moura Filho",
+    ELIAS: "Elias Teodoro da Silva Júnior",
+    NIVANDO: "Francisco Nivando Bezerra",
+    ALISSON: "Alisson Gomes Linhares",
+    ALLYSON: "Allyson Bonetti França",
+    "RICARDO TAVEIRA": "Ricardo Duarte Taveira",
+    NIDIA: "Nídia Glória da Silva Campos",
+    "PAULO REGIS": "Paulo Régis Carneiro de Araújo",
+    RONALDO: "Ronaldo Fernandes Ramos",
+    PH: "Paulo Henrique",
+    JOACILO: "Joacilo",
+    JOACILLO: "Joacilo",
+    "RICARDO RODRIGES": "Ricardo Rodriges",
+    "RICARDO RODRIGUES": "Ricardo Rodrigues",
+};
+
+const PROFESSOR_CANONICAL_MAP = new Map(
+    Object.entries(PROFESSOR_CANONICAL_MAP_RAW).map(([alias, canonical]) => [
+        normalizeComparable(alias).toUpperCase(),
+        canonical,
+    ]),
+);
+
+const KNOWN_PROFESSORS = Array.from(new Set(PROFESSOR_CANONICAL_MAP.values()));
 
 const TAG_BY_EXTENSION: Record<string, string> = {
     c: "C",
@@ -327,6 +384,43 @@ function isLikelySigla(sigla: string): boolean {
     return sigla.length <= 6 && /^[A-Z0-9]+$/.test(sigla);
 }
 
+function getSemesterNumberFromPath(path: unknown): number | null {
+    const normalizedPath = normalizePath(path);
+    const match = normalizedPath.match(/(?:^|\/)s(\d{1,2})(?:\/|$)/i);
+    if (!match?.[1]) {
+        return null;
+    }
+
+    const semesterNumber = Number(match[1]);
+    return Number.isFinite(semesterNumber) ? semesterNumber : null;
+}
+
+function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
+    if (!sigla) {
+        return "";
+    }
+
+    const normalizedPath = normalizeComparable(path).toUpperCase();
+    if (sigla === "ED") {
+        if (/\bALISSON\b|\bALLYSON\b/.test(normalizedPath)) {
+            return "Estrutura de Dados";
+        }
+        if (/\bJB\b|\bJOACIL+O\b/.test(normalizedPath)) {
+            return "Eletrônica Digital";
+        }
+    }
+
+    const semesterNumber = getSemesterNumberFromPath(path);
+    if (semesterNumber !== null) {
+        const semesterMapped = DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla]?.[semesterNumber];
+        if (semesterMapped) {
+            return semesterMapped;
+        }
+    }
+
+    return DISCIPLINA_BY_SIGLA[sigla] ?? "";
+}
+
 function getSemesterFromText(value: unknown): string {
     const text = normalizeComparable(value);
 
@@ -378,7 +472,7 @@ function getSubjectPart(path: unknown): string {
             return part;
         }
 
-        if (DISCIPLINA_BY_SIGLA[sigla]) {
+        if (resolveDisciplinaBySigla(sigla, normalizedPath)) {
             return part;
         }
 
@@ -413,6 +507,70 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     return { sigla, name };
+}
+
+function levenshteinDistance(a: string, b: string): number {
+    if (a === b) {
+        return 0;
+    }
+    if (!a.length) {
+        return b.length;
+    }
+    if (!b.length) {
+        return a.length;
+    }
+
+    const previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+    const current = new Array<number>(b.length + 1).fill(0);
+
+    for (let i = 1; i <= a.length; i += 1) {
+        current[0] = i;
+        for (let j = 1; j <= b.length; j += 1) {
+            const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+            current[j] = Math.min(
+                previous[j] + 1,
+                current[j - 1] + 1,
+                previous[j - 1] + substitutionCost,
+            );
+        }
+        for (let j = 0; j <= b.length; j += 1) {
+            previous[j] = current[j];
+        }
+    }
+
+    return previous[b.length];
+}
+
+function normalizeProfessorName(candidate: string): string {
+    const normalizedCandidate = normalizeText(candidate);
+    if (!normalizedCandidate) {
+        return "";
+    }
+
+    const canonical = PROFESSOR_CANONICAL_MAP.get(normalizeComparable(normalizedCandidate).toUpperCase());
+    if (canonical) {
+        return canonical;
+    }
+
+    const comparableCandidate = normalizeComparable(normalizedCandidate).toUpperCase();
+    let bestMatch = "";
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const professor of KNOWN_PROFESSORS) {
+        const comparableProfessor = normalizeComparable(professor).toUpperCase();
+        const distance = levenshteinDistance(comparableCandidate, comparableProfessor);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestMatch = professor;
+        }
+    }
+
+    if (!bestMatch) {
+        return normalizedCandidate.toUpperCase();
+    }
+
+    const threshold = Math.max(1, Math.floor(bestMatch.length * 0.2));
+    return bestDistance <= threshold ? bestMatch : normalizedCandidate.toUpperCase();
 }
 
 function getSubjectSigla(file: RepoFile | null | undefined): string {
@@ -527,6 +685,11 @@ export function inferMetadata(
         return null;
     }
 
+    const extension = normalizeComparable(normalizedFile.extension).replace(/^\./, "");
+    if (options?.filterCodeFiles && COMPILED_ARTIFACT_EXTENSIONS.has(extension)) {
+        return null;
+    }
+
     if (options?.filterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile)) {
         return null;
     }
@@ -595,20 +758,27 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const assessmentLabel = getAssessmentLabel(nameWithoutExt);
     const explicitPartMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*(\d+)\b/i);
     const shortPartMatch = normalizedName.match(/(?:^|[\s._-])p\s*(\d{1,3})\b/i);
-    const part = explicitPartMatch?.[1] ?? (!assessmentLabel ? shortPartMatch?.[1] : "");
+    const sequentialSuffixMatch = isImage ? nameWithoutExt.match(/[\-_](\d{1,3})$/) : null;
+    const sequencePart = sequentialSuffixMatch?.[1] ? String(Number(sequentialSuffixMatch[1])) : "";
+    const part = explicitPartMatch?.[1] || (!assessmentLabel ? shortPartMatch?.[1] || "" : "") || sequencePart;
     const isNumericList = tipo === "Lista de Exercícios" && /^lista\s+\d+$/i.test(cleanedName);
 
     if (part && !isNumericList) {
         const partPattern = explicitPartMatch
             ? /\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*\d+\b/gi
             : /\bp\s*\d+\b/gi;
-        const baseTitle = cleanedName
-            .replace(partPattern, "")
+        const baseTitle = (sequencePart && part === sequencePart
+            ? cleanedName.replace(/\s+0*\d{1,3}\s*$/, "")
+            : cleanedName.replace(partPattern, ""))
             .replace(/\s{2,}/g, " ")
             .trim();
         let finalBaseTitle = baseTitle || cleanedName;
         if (tipo === "Lista de Exercícios" && /^\d+$/.test(finalBaseTitle)) {
             finalBaseTitle = `Lista ${finalBaseTitle}`;
+        }
+        if (isImage && sequencePart && part === sequencePart && finalBaseTitle.length < 10) {
+            const contextTitle = subject || subjectSigla || finalBaseTitle;
+            return `${contextTitle} - Parte ${sequencePart.padStart(2, "0")}`;
         }
         if (finalBaseTitle) {
             return `${finalBaseTitle} (Parte ${part})`;
@@ -697,7 +867,7 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isAdministrative = TIPO_PATTERNS.administrativo.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
     const isGabaritoResolucao = TIPO_PATTERNS.gabaritoResolucao.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
     const isMaterialFolder = MATERIAL_FOLDER_PATTERN.test(contextualPath);
-    const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path);
+    const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path) || /(^|\/)puds?(\/|$)/i.test(path);
     const isRootProvasFolder = /^provas?(?:\b|\s|$)/i.test(normalizeComparable(pathParts[0] ?? ""));
     const isProvasFolder = nestedParts.some((part) => /^provas?(?:\b|\s|$)/i.test(normalizeComparable(part)));
     const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(contextualPath);
@@ -736,6 +906,10 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Prova";
     }
 
+    if (["dsn", "pdsprj", "pdsit", "m"].includes(extension) && isAula) {
+        return "Material de Aula";
+    }
+
     if (
         TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(contextualPath)) ||
         ["py", "c", "java", "pdsprj", "pdsbak", "pdsit", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
@@ -756,6 +930,9 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     }
 
     if (IMAGE_EXTENSIONS.has(extension)) {
+        if (hasAcademicSemester) {
+            return "Prova";
+        }
         return "Material Complementar";
     }
 
@@ -774,8 +951,27 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
 
         const comparable = normalizeComparable(part);
         const { sigla, name } = getSiglaAndName(part);
-        if (sigla && DISCIPLINA_BY_SIGLA[sigla]) {
-            return DISCIPLINA_BY_SIGLA[sigla];
+        const hasLetterInSigla = /[A-Z]/.test(sigla);
+        const isAmbiguousSigla = Boolean(DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla]);
+        const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(part);
+
+        if (sigla && hasLetterInSigla) {
+            const resolvedByContext = resolveDisciplinaBySigla(sigla, path);
+            if (name) {
+                const normalizedName = normalizeText(name);
+                if (!resolvedByContext) {
+                    return normalizedName;
+                }
+                const normalizedResolved = normalizeComparable(resolvedByContext);
+                const normalizedExtracted = normalizeComparable(normalizedName);
+                if (isAmbiguousSigla && hasExplicitName && normalizedResolved !== normalizedExtracted) {
+                    return normalizedName;
+                }
+                return resolvedByContext;
+            }
+            if (resolvedByContext) {
+                return resolvedByContext;
+            }
         }
 
         const isIgnored =
@@ -911,7 +1107,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     }
 
     if (profName) {
-        const normalizedProfessorTag = normalizeText(profName).toUpperCase();
+        const normalizedProfessorTag = normalizeProfessorName(profName);
         if (normalizedProfessorTag.length >= 2 && /[A-Z]/.test(normalizedProfessorTag)) {
             tags.add(normalizedProfessorTag);
         }
@@ -937,5 +1133,6 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Revisão");
     }
 
-    return Array.from(tags);
+    const cleanedTags = Array.from(tags).filter((tag) => !/^\d+\s*[.)-]\s*/.test(normalizeText(tag)));
+    return cleanedTags;
 }
