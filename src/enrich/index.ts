@@ -75,6 +75,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     PPD: "Programação Paralela e Distribuída",
     EG: "Empreendedorismo e Gestão",
     VC: "Visão Computacional",
+    SE: "Sistemas Embarcados",
     EDO: "Equações Diferenciais",
     EA: "Eletrônica Analógica",
     MI: "Microcontroladores e Microprocessadores",
@@ -84,6 +85,16 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     TCC: "Trabalho de Conclusão de Curso",
     BEPID: "BEPID Apple",
 };
+
+const IGNORED_SUBJECT_FOLDERS = new Set([
+    "documentos",
+    "puds",
+    "provas",
+    "listas",
+    "conteudo",
+    "material de apoio",
+    "pics",
+]);
 
 const TIPO_PATTERNS = {
     prova: [
@@ -115,7 +126,7 @@ const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monito
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
-const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "hex", "cof"]);
+const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "hex", "cof"]);
 const TECHNICAL_SIGLAS = new Set(["ED", "EA", "MI", "SE", "IAI", "STR", "RC", "RCC", "SD", "SM"]);
 
 const TAG_BY_EXTENSION: Record<string, string> = {
@@ -133,6 +144,7 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     ipynb: "Jupyter",
     dsn: "Proteus",
     pdsprj: "Proteus",
+    pdsbak: "Proteus",
     tex: "LaTeX",
     png: "Imagem",
     jpg: "Imagem",
@@ -272,32 +284,45 @@ function getSubjectPart(path: unknown): string {
     const normalizedPath = normalizePath(path);
     const parts = normalizedPath.split("/").filter(Boolean);
 
-    const bySemesterFolder = normalizedPath.match(/\/S\d{2}\/([^/]+)/i)?.[1];
-    if (bySemesterFolder) {
-        return fixMojibake(bySemesterFolder.trim());
-    }
-
     const siglaNamePattern = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/;
-    const bySiglaAndName = parts.find((part) => siglaNamePattern.test(part));
-    if (bySiglaAndName) {
-        return fixMojibake(bySiglaAndName.trim());
-    }
+    let fallback = "";
 
-    for (const part of parts) {
-        const comparable = normalizeComparable(part);
-        const sigla = normalizeSigla(part);
-        if (!part.trim() || /^s\d{2}$/i.test(part) || /^\d{4}[._\-\s]?[12]$/.test(comparable)) {
+    for (let i = parts.length - 2; i >= 0; i -= 1) {
+        const part = fixMojibake(parts[i]).trim();
+        if (!part) {
             continue;
         }
 
+        const comparable = normalizeComparable(part);
+        const sigla = normalizeSigla(part);
+        const isIgnoredFolder =
+            IGNORED_SUBJECT_FOLDERS.has(comparable) ||
+            /^s\d{2}$/i.test(part) ||
+            /^n\d$/i.test(part) ||
+            /^\d{4}$/.test(comparable) ||
+            /^\d{4}[._\-\s]?[12](?:\s*-\s*.+)?$/.test(comparable);
+        if (isIgnoredFolder) {
+            continue;
+        }
+
+        if (!fallback) {
+            fallback = part;
+        }
+
+        if (siglaNamePattern.test(part)) {
+            return part;
+        }
+
         if (DISCIPLINA_BY_SIGLA[sigla]) {
-            return fixMojibake(part.trim());
+            return part;
+        }
+
+        if (/\s-\s/.test(part) && !/^\d{4}[._\-\s]?[12]/.test(comparable)) {
+            return part;
         }
     }
 
-    return fixMojibake(
-        parts.find((part) => /\s-\s/.test(part) && !/\d{4}[._\-\s]?[12]/.test(part))?.trim() ?? "",
-    );
+    return fallback;
 }
 
 function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
@@ -432,23 +457,53 @@ export function inferMetadata(
 export function normalizeTitle(file: RepoFile | null | undefined): string {
     const semester = inferSemester(file);
     const subjectSigla = getSubjectSigla(file);
+    const subject = inferDisciplina(file);
+    const tipo = inferTipo(file);
     const originalName = safeString(file?.name);
     const nameWithoutExt = fixMojibake(originalName.replace(/\.[^/.]+$/, ""));
+    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const isImage = IMAGE_EXTENSIONS.has(extension);
+
+    if (/^\s*pud\b/i.test(nameWithoutExt) || tipo === "Plano de Ensino") {
+        return subject ? `Plano de Ensino - ${subject}` : "Plano de Ensino";
+    }
+
     let cleanedName = normalizeText(nameWithoutExt)
         .replace(/^\d{5,}[-_\s]*/, "")
         .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
-        .replace(/^\s*(PUD)\b\s*/gi, "")
+        .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
         .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
         .replace(/[._\-]/g, " ")
         .replace(/\s*\(\s*(?:copia|copy)\s*\d*\s*\)\s*$/i, "")
         .replace(/\s+/g, " ")
         .trim();
 
+    if (tipo === "Prova") {
+        cleanedName = cleanedName.replace(/^\s*(?:prova|avaliac(?:ao|ão)|simulado)\b[:\-\s]*/i, "").trim();
+    }
+
+    if (tipo === "Lista de Exercícios") {
+        cleanedName = cleanedName.replace(/^\s*(?:lista)\b[:\-\s]*/i, "").trim();
+    }
+
     if (!cleanedName) {
         cleanedName = normalizeText(nameWithoutExt);
     }
 
     cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
+
+    if (tipo === "Prova" && isImage) {
+        const normalizedName = normalizeComparable(nameWithoutExt);
+        const gradeMatch = normalizedName.match(/\bn\s*([1-4])\b/i);
+        const explicitPart = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg)\s*(\d+)\b/i)?.[1];
+        const sequentialPart = normalizedName.match(/\bn\s*[1-4]\D+(\d+)\b/i)?.[1];
+        const part = explicitPart || sequentialPart;
+        const base = gradeMatch ? `Prova N${gradeMatch[1]}` : "Prova";
+        if (part) {
+            return `${base} (Parte ${part})`;
+        }
+        return base;
+    }
 
     const assessmentLabel = getAssessmentLabel(nameWithoutExt);
     if (semester && assessmentLabel) {
@@ -487,7 +542,7 @@ export function inferTipo(file: RepoFile | null | undefined): string {
 
     if (
         TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(path)) ||
-        ["py", "c", "java", "pdsprj", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
+        ["py", "c", "java", "pdsprj", "pdsbak", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
     ) {
         return "Trabalho/Projeto";
     }
@@ -581,9 +636,32 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Hardware");
     }
 
+    let profName = "";
+
     const professorMatch = fixMojibake(normalizedPath).match(/\d{4}[._\-\s]?[12]\s*-\s*([^/]+)/i);
     if (professorMatch) {
-        const profName = professorMatch[1].trim();
+        profName = professorMatch[1].trim();
+    } else {
+        const pathParts = normalizePath(normalizedPath).split("/").filter(Boolean);
+        for (let i = 0; i < pathParts.length - 1; i += 1) {
+            const part = fixMojibake(pathParts[i]).trim();
+            const normalizedPart = normalizeComparable(part);
+            if (/^\d{4}[._\-\s]?[12]$/.test(normalizedPart) && i + 1 < pathParts.length - 1) {
+                const candidate = fixMojibake(pathParts[i + 1]).trim();
+                if (
+                    candidate.length >= 2 &&
+                    /[A-Za-z]/.test(candidate) &&
+                    !/^s\d{2}$/i.test(candidate) &&
+                    !/^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(candidate)
+                ) {
+                    profName = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (profName) {
         if (profName.length >= 2 && /[A-Za-z]/.test(profName)) {
             tags.add(profName);
         }
