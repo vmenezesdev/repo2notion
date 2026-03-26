@@ -109,17 +109,23 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     "7z": "Compactado",
 };
 
-function normalizePath(path: string): string {
-    return path.replace(/\\/g, "/").replace(/\/+/g, "/");
+function safeString(value: unknown): string {
+    return typeof value === "string" ? value : "";
 }
 
-function stripDiacritics(value: string): string {
-    return value?.normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
+function normalizePath(path: unknown): string {
+    return safeString(path).replace(/\\/g, "/").replace(/\/+/g, "/");
 }
 
-function fixMojibake(value: string): string {
-    if (!/[ÃÂ]/.test(value)) {
-        return value;
+function stripDiacritics(value: unknown): string {
+    return safeString(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function fixMojibake(value: unknown): string {
+    const safeValue = safeString(value);
+
+    if (!/[ÃÂ]/.test(safeValue)) {
+        return safeValue;
     }
 
     const replacements: Array<[RegExp, string]> = [
@@ -175,7 +181,7 @@ function fixMojibake(value: string): string {
         [/Â/g, ""],
     ];
 
-    let fixed = value;
+    let fixed = safeValue;
     for (const [pattern, replacement] of replacements) {
         fixed = fixed.replace(pattern, replacement);
     }
@@ -183,7 +189,7 @@ function fixMojibake(value: string): string {
     return fixed;
 }
 
-function normalizeText(value: string): string {
+function normalizeText(value: unknown): string {
     return stripDiacritics(fixMojibake(value))
         .normalize("NFKC")
         .replace(/[_]+/g, " ")
@@ -191,15 +197,15 @@ function normalizeText(value: string): string {
         .trim();
 }
 
-function normalizeComparable(value: string): string {
+function normalizeComparable(value: unknown): string {
     return normalizeText(value).toLowerCase();
 }
 
-function normalizeSigla(value: string): string {
+function normalizeSigla(value: unknown): string {
     return normalizeComparable(value).replace(/[^a-z0-9]/g, "").toUpperCase();
 }
 
-function getSemesterFromText(value: string): string {
+function getSemesterFromText(value: unknown): string {
     const text = normalizeComparable(value);
 
     for (const regex of SEMESTER_REGEXES) {
@@ -213,7 +219,7 @@ function getSemesterFromText(value: string): string {
     return "";
 }
 
-function getSubjectPart(path: string): string {
+function getSubjectPart(path: unknown): string {
     const normalizedPath = normalizePath(path);
     const parts = normalizedPath.split("/").filter(Boolean);
 
@@ -262,10 +268,10 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     return { sigla, name };
 }
 
-function isNoiseFile(file: RepoFile): boolean {
-    const normalizedPath = `/${normalizeComparable(normalizePath(file.path))}/`;
-    const normalizedName = normalizeComparable(file.name);
-    const extension = normalizeComparable(file.extension).replace(/^\./, "");
+function isNoiseFile(file: RepoFile | null | undefined): boolean {
+    const normalizedPath = `/${normalizeComparable(normalizePath(file?.path))}/`;
+    const normalizedName = normalizeComparable(file?.name);
+    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
 
     if (NOISE_PATH_MARKERS.some((marker) => normalizedPath.includes(marker))) {
         return true;
@@ -324,10 +330,16 @@ function getAssessmentLabel(nameWithoutExt: string): string {
  * }
  * ```
  */
-export function inferMetadata(file: RepoFile): RecordCandidate | null {
+export function inferMetadata(file: RepoFile | null | undefined): RecordCandidate | null {
+    if (!file) {
+        return null;
+    }
+
     if (isNoiseFile(file)) {
         return null;
     }
+
+    const sourcePath = normalizePath(file.path);
 
     return {
         title: normalizeTitle(file),
@@ -335,13 +347,14 @@ export function inferMetadata(file: RepoFile): RecordCandidate | null {
         disciplina: inferDisciplina(file),
         semester: inferSemester(file),
         tags: inferTags(file),
-        sourcePath: file.path,
-    }
+        sourcePath,
+    };
 }
 
-export function normalizeTitle(file: RepoFile): string {
+export function normalizeTitle(file: RepoFile | null | undefined): string {
     const semester = inferSemester(file);
-    const nameWithoutExt = fixMojibake(file.name.replace(/\.[^/.]+$/, ""));
+    const originalName = safeString(file?.name);
+    const nameWithoutExt = fixMojibake(originalName.replace(/\.[^/.]+$/, ""));
     const cleanedName = normalizeText(nameWithoutExt)
         .replace(/^\d{5,}[-_\s]*/, "")
         .replace(/[\-]+/g, " ")
@@ -353,13 +366,13 @@ export function normalizeTitle(file: RepoFile): string {
         return `${assessmentLabel} - ${semester}`;
     }
 
-    return cleanedName || normalizeText(nameWithoutExt) || file.name;
+    return cleanedName || normalizeText(nameWithoutExt) || originalName;
 }
 
-export function inferTipo(file: RepoFile): string {
-    const name = normalizeComparable(file.name);
-    const path = normalizeComparable(normalizePath(file.path));
-    const extension = file.extension.toLowerCase().replace(/^\./, "");
+export function inferTipo(file: RepoFile | null | undefined): string {
+    const name = normalizeComparable(file?.name);
+    const path = normalizeComparable(normalizePath(file?.path));
+    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
 
     if (TIPO_PATTERNS.prova.some((pattern) => pattern.test(name) || pattern.test(path))) {
         return "Prova";
@@ -384,8 +397,8 @@ export function inferTipo(file: RepoFile): string {
     return "Material Complementar";
 }
 
-export function inferDisciplina(file: RepoFile): string {
-    const subjectPart = getSubjectPart(normalizePath(file.path));
+export function inferDisciplina(file: RepoFile | null | undefined): string {
+    const subjectPart = getSubjectPart(normalizePath(file?.path));
     const { sigla, name } = getSiglaAndName(subjectPart);
 
     if (DISCIPLINA_BY_SIGLA[sigla]) {
@@ -399,18 +412,19 @@ export function inferDisciplina(file: RepoFile): string {
     return fixMojibake(subjectPart);
 }
 
-export function inferSemester(file: RepoFile): string {
-    return getSemesterFromText(`${normalizePath(file.path)} ${file.name}`);
+export function inferSemester(file: RepoFile | null | undefined): string {
+    return getSemesterFromText(`${normalizePath(file?.path)} ${safeString(file?.name)}`);
 }
 
-export function inferTags(file: RepoFile): string[] {
+export function inferTags(file: RepoFile | null | undefined): string[] {
     const tags = new Set<string>();
-    const normalizedPath = normalizePath(file.path);
+    const normalizedPath = normalizePath(file?.path);
+    const fileName = safeString(file?.name);
     const subjectPart = getSubjectPart(normalizedPath);
     const { sigla } = getSiglaAndName(subjectPart);
     const semester = inferSemester(file);
     const tipo = inferTipo(file);
-    const extension = file.extension.toLowerCase().replace(/^\./, "");
+    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
     const upperPath = normalizeComparable(normalizedPath).toUpperCase();
 
     if (sigla) {
@@ -422,7 +436,7 @@ export function inferTags(file: RepoFile): string[] {
     }
 
     if (tipo === "Prova") {
-        const provaTag = getAssessmentLabel(file.name.replace(/\.[^/.]+$/, ""));
+        const provaTag = getAssessmentLabel(fileName.replace(/\.[^/.]+$/, ""));
         if (provaTag) {
             tags.add(provaTag);
         }
@@ -433,23 +447,23 @@ export function inferTags(file: RepoFile): string[] {
         tags.add(extensionTag);
     }
 
-    if (upperPath.includes("N1") || /\bP1\b/.test(file.name.toUpperCase())) {
+    if (upperPath.includes("N1") || /\bP1\b/.test(fileName.toUpperCase())) {
         tags.add("N1");
     }
-    if (upperPath.includes("N2") || /\bP2\b/.test(file.name.toUpperCase())) {
+    if (upperPath.includes("N2") || /\bP2\b/.test(fileName.toUpperCase())) {
         tags.add("N2");
     }
 
-    if (/GABARITO/i.test(file.name) || /GABARITO/i.test(normalizedPath)) {
+    if (/GABARITO/i.test(fileName) || /GABARITO/i.test(normalizedPath)) {
         tags.add("Gabarito");
     }
-    if (/RESOLUCAO|RESOLUÇÃO|SOLUCAO|SOLUÇÃO/i.test(file.name) || /RESOLUCAO|RESOLUÇÃO|SOLUCAO|SOLUÇÃO/i.test(normalizedPath)) {
+    if (/RESOLUCAO|RESOLUÇÃO|SOLUCAO|SOLUÇÃO/i.test(fileName) || /RESOLUCAO|RESOLUÇÃO|SOLUCAO|SOLUÇÃO/i.test(normalizedPath)) {
         tags.add("Resolução");
     }
     if (/MONITORIA/i.test(normalizedPath)) {
         tags.add("Monitoria");
     }
-    if (/REVISAO|REVISAO|REVISÃO/i.test(file.name) || /REVISAO|REVISAO|REVISÃO/i.test(normalizedPath)) {
+    if (/REVISAO|REVISAO|REVISÃO/i.test(fileName) || /REVISAO|REVISAO|REVISÃO/i.test(normalizedPath)) {
         tags.add("Revisão");
     }
 
