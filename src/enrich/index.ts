@@ -53,6 +53,13 @@ const NOISE_EXTENSIONS = new Set([
     "pjt",
     "sym",
     "tre",
+    "ptn",
+    "mem",
+    "log",
+    "exe",
+    "jar",
+    "bin",
+    "info",
     "o",
     "pdsbak",
     "old",
@@ -688,6 +695,13 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
 
     const normalizedPath = normalizeComparable(path).toUpperCase();
 
+    if (sigla === "CA" || sigla === "CALC") {
+        const calculoLevel = inferCalculoLevelFromPath(path);
+        if (calculoLevel) {
+            return `Calculo ${calculoLevel}`;
+        }
+    }
+
     if (sigla === "ED") {
         if (/\bESTRUTURA\b|\bDADOS\b/.test(normalizedPath)) {
             return "Estrutura de Dados";
@@ -725,6 +739,31 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     }
 
     return DISCIPLINA_BY_SIGLA[sigla] ?? "";
+}
+
+function inferCalculoLevelFromPath(path: unknown): string {
+    const normalizedPath = normalizeComparable(path);
+    if (!normalizedPath) {
+        return "";
+    }
+
+    const levelMatch = normalizedPath.match(/\bcalculo\s*(?:[-–—_.]|\s)*(i{1,3}|[123])\b/i);
+    if (!levelMatch?.[1]) {
+        return "";
+    }
+
+    const token = normalizeComparable(levelMatch[1]);
+    if (token === "1" || token === "i") {
+        return "I";
+    }
+    if (token === "2" || token === "ii") {
+        return "II";
+    }
+    if (token === "3" || token === "iii") {
+        return "III";
+    }
+
+    return "";
 }
 
 function getSemesterFromText(value: unknown): string {
@@ -940,11 +979,16 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     const normalizedSubject = fixMojibake(subjectPart).trim();
-    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*[-–—_]\s*(.+)$/);
+    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,6})\s*([-–—_])?\s*(.+)$/);
     if (compactSiglaMatch) {
+        const sigla = normalizeSigla(compactSiglaMatch[1]);
+        const hasSeparator = Boolean(compactSiglaMatch[2]);
+        if (!hasSeparator && !DISCIPLINA_BY_SIGLA[sigla]) {
+            return { sigla: "", name: "" };
+        }
         return {
-            sigla: normalizeSigla(compactSiglaMatch[1]),
-            name: compactSiglaMatch[2].trim(),
+            sigla,
+            name: compactSiglaMatch[3].trim(),
         };
     }
 
@@ -1206,9 +1250,10 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
         .filter(Boolean)
         .map((part) => normalizeComparable(part));
     const normalizedName = normalizeComparable(file?.name);
+    const normalizedStem = normalizeComparable(safeString(file?.name).replace(/\.[^/.]+$/, ""));
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
 
-    const isReadme = normalizedName === "readme.md";
+    const isReadme = normalizedName === "readme.md" || normalizedStem === "readme";
     if (isReadme) {
         const folderParts = normalizedPathParts.slice(0, Math.max(0, normalizedPathParts.length - 1));
         const atRepoRoot = folderParts.length <= 1;
@@ -1471,6 +1516,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     let cleanedName = normalizeText(nameWithoutExt)
+        .replace(/^\d{5,}(?:\s*[-–—_.]\s*\d+)?\s*[-–—_.]*\s*(?=[A-Za-zÀ-ÿ])/i, "")
         .replace(/^\d{5,}[._\-\s]*/, "")
         .replace(/\b\d{7,}\b/g, "")
         .replace(/^\d{5,}(?=[A-Za-z])/, "")
@@ -1487,6 +1533,8 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/\[\s*\]/g, " ")
         .replace(/\(\s*\)/g, " ")
         .replace(/\s*\(\s*(?:copia|copy)\s*\d*\s*\)\s*$/i, "")
+        .replace(/^\s*\d+\s*[-–—_]\s*(?=\d+\s*(?:a|ª|o|º)?\s*lista\b)/i, "")
+        .replace(/\s*[-–—_]\s*$/, "")
         .replace(/\s+/g, " ")
         .trim();
 
@@ -1500,15 +1548,15 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const normalizedOriginalName = normalizeComparable(nameWithoutExt);
     const hasGabaritoHint = /\b(gabarito|answer\s*key|respostas?)\b/i.test(normalizedOriginalName);
     const hasResolucaoHint = /\b(resolu[cç][aã]o|solu[cç][aã]o|resolvidos|solution)\b/i.test(normalizedOriginalName);
+    const hasToolResolutionHint = /\b(wolfram(?:\s*alpha)?|symbolab|photomath|mathway)\b/i.test(normalizedOriginalName);
+    const shouldPreferResolucao = hasToolResolutionHint || hasResolucaoHint;
     const resolutionPrefix = tipo === "Gabarito/Resolução"
-        ? hasGabaritoHint
+        ? shouldPreferResolucao
+            ? "Resolução"
+            : "Gabarito"
+        : hasGabaritoHint && !hasToolResolutionHint
             ? "Gabarito"
-            : hasResolucaoHint
-                ? "Resolução"
-                : "Gabarito"
-        : hasGabaritoHint
-            ? "Gabarito"
-            : hasResolucaoHint
+            : shouldPreferResolucao
                 ? "Resolução"
                 : "";
 
@@ -1653,6 +1701,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
                 cleanedName = "Material";
             }
         }
+        cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
         cleanedName = `${resolutionPrefix} - ${cleanedName}`;
     }
 
@@ -1817,7 +1866,10 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 }
 
 export function inferTipo(file: RepoFile | null | undefined): string {
-    const name = normalizeComparable(safeString(file?.name).replace(/\.[^/.]+$/, ""));
+    let name = normalizeComparable(safeString(file?.name).replace(/\.[^/.]+$/, ""));
+    name = name
+        .replace(/(\d+\s*(?:a|ª|o|º)?)listade/gi, "$1 lista de")
+        .replace(/listade/gi, "lista de");
     const normalizedPath = normalizePath(file?.path);
     const path = normalizeComparable(normalizedPath);
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
@@ -1987,10 +2039,29 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
             continue;
         }
 
+        const previousPart = parts[i - 1] ?? "";
+        const previousComparable = normalizeComparable(previousPart);
+        const isLikelyYearSemester = /^(?:19|20)\d{2}[._\-\s]?[12]$/.test(previousComparable);
+        const isLikelyNameFolder = /^[A-Za-zÀ-ÿ]{3,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3}$/.test(part);
+        if (isLikelyYearSemester && isLikelyNameFolder) {
+            continue;
+        }
+
         if (sigla && hasLetterInSigla && !hasGenericPrefix) {
             const resolvedByContext = resolveDisciplinaBySigla(sigla, path);
             if (name) {
                 const normalizedName = normalizeText(name);
+                if (sigla === "CA" || sigla === "CALC") {
+                    if (/^calculo\s+(?:i{1,3}|[123])$/i.test(normalizeComparable(normalizedName))) {
+                        return normalizedName;
+                    }
+                    if (/^calculo$/i.test(normalizeComparable(normalizedName))) {
+                        const calculoLevel = inferCalculoLevelFromPath(path);
+                        if (calculoLevel) {
+                            return `${normalizedName} ${calculoLevel}`;
+                        }
+                    }
+                }
                 if (hasExplicitName) {
                     if (
                         resolvedByContext &&

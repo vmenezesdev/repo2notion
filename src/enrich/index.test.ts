@@ -618,6 +618,18 @@ test("filtra arquivos de sistema e temporarios do Word", () => {
     assert.equal(inferMetadata(tempWord), null);
 });
 
+test("filtra extensoes adicionais de ruido", () => {
+    const logFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/WS_FTP.LOG", "WS_FTP.LOG", "LOG");
+    const exeFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/Daedalus.exe", "Daedalus.exe", "exe");
+    const jarFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/Mars_4_1.jar", "Mars_4_1.jar", "jar");
+    const infoFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/ZbThumbnail.info", "ZbThumbnail.info", "info");
+
+    assert.equal(inferMetadata(logFile), null);
+    assert.equal(inferMetadata(exeFile), null);
+    assert.equal(inferMetadata(jarFile), null);
+    assert.equal(inferMetadata(infoFile), null);
+});
+
 test("preserva ano no inicio de nome de prova", () => {
     const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/2019-Prova.pdf", "2019-Prova.pdf", "pdf");
     assert.equal(normalizeTitle(file), "2019-Prova");
@@ -781,6 +793,31 @@ test("prefixa gabarito quando categoria vem do contexto", () => {
 test("captura sigla com underscore sem espacos", () => {
     const file = makeFile("/S02/EA_Eletronica Analogica/2024.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf");
     assert.equal(inferDisciplina(file), "Eletrônica Analógica");
+});
+
+test("captura sigla com hifen sem espaco antes", () => {
+    const file = makeFile("/S02/EA- Eletronica Analogica/2024.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Eletrônica Analógica");
+});
+
+test("diferencia calculo por nivel no caminho", () => {
+    const file = makeFile("/S02/CA/Calculo II/2024.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Calculo II");
+});
+
+test("prioriza resolucao para arquivos de ferramentas", () => {
+    const file = makeFile("/S01/CA - Calculo/2024.1 - PH/gabarito derivative Wolfram Alpha.pdf", "gabarito derivative Wolfram Alpha.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Resolução - Derivative Wolfram Alpha");
+});
+
+test("remove prefixo numerico residual antes de lista", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/1150511-1_-_5ªListadeExercicios.pdf", "1150511-1_-_5ªListadeExercicios.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Lista 5 - Exercicios");
+});
+
+test("trata readme sem extensao como ruido", () => {
+    const readmeInBuild = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/quartus/incremental_db/README", "README", "");
+    assert.equal(inferMetadata(readmeInBuild), null);
 });
 
 test("infere disciplina em pasta de professor por contexto tecnico", () => {
