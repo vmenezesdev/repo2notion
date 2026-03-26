@@ -27,3 +27,32 @@ export function removeGitPaths(files: RepoFile[]): RepoFile[] {
     .filter((file) => !file.path.includes(".gitattributes"))
     .filter((file) => !file.path.includes(".gitignore"));
 }
+
+function normalizeComparablePath(path: string): string {
+    return String(path ?? "")
+        .normalize("NFC")
+        .replace(/\\/g, "/")
+        .replace(/\/+/g, "/")
+        .toLowerCase();
+}
+
+export function dedupeUnicodeEquivalentPaths(files: RepoFile[]): RepoFile[] {
+    const seen = new Set<string>();
+    const deduped: RepoFile[] = [];
+
+    for (const file of files) {
+        const key = normalizeComparablePath(file.path);
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        deduped.push({
+            ...file,
+            path: String(file.path ?? "").normalize("NFC"),
+            name: String(file.name ?? "").normalize("NFC"),
+            extension: String(file.extension ?? "").normalize("NFC"),
+        });
+    }
+
+    return deduped;
+}

@@ -239,18 +239,18 @@ test("reconhece segunda chamada no titulo e nas tags", () => {
     assert.ok(tags.includes("2ª Chamada"));
 });
 
-test("classifica binarios de firmware como hardware/projeto", () => {
+test("classifica binarios de firmware como projeto sem hardware", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.hex", "projeto_final.hex", "hex");
     assert.equal(inferTipo(file), "Trabalho/Projeto");
     const tags = inferTags(file);
-    assert.ok(tags.includes("Hardware"));
+    assert.ok(!tags.includes("Hardware"));
 });
 
 test("classifica pdsbak como hardware e proteus", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.pdsbak", "projeto_final.pdsbak", "pdsbak");
     assert.equal(inferTipo(file), "Trabalho/Projeto");
     const tags = inferTags(file);
-    assert.ok(tags.includes("Hardware"));
+    assert.ok(!tags.includes("Hardware"));
     assert.ok(tags.includes("Proteus"));
     assert.ok(tags.includes("Simulação"));
 });
@@ -273,7 +273,7 @@ test("classifica extensoes de quartus como hardware e simulacao", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.sof", "projeto_final.sof", "sof");
     assert.equal(inferTipo(file), "Trabalho/Projeto");
     const tags = inferTags(file);
-    assert.ok(tags.includes("Hardware"));
+    assert.ok(!tags.includes("Hardware"));
     assert.ok(tags.includes("Simulação"));
     assert.ok(tags.includes("Quartus"));
 });
@@ -343,7 +343,7 @@ test("adiciona tag projeto para arquivos de proteus", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.pdsprj", "projeto_final.pdsprj", "pdsprj");
     const tags = inferTags(file);
     assert.ok(tags.includes("Projeto"));
-    assert.ok(tags.includes("Hardware"));
+    assert.ok(!tags.includes("Hardware"));
 });
 
 test("nao trata pasta de avaliacao como provas para proteus", () => {
@@ -579,13 +579,13 @@ test("mantem codigo quando nome indica projeto em contexto novo", () => {
 test("remove tags redundantes quando sigla ja representa disciplina", () => {
     const tags = inferTags(makeFile("/BEPID-Apple/2014/Projeto 1.docx", "Projeto 1.docx", "docx"));
     assert.ok(tags.includes("BEPID"));
-    assert.ok(!tags.includes("BEPID Apple"));
+    assert.ok(tags.includes("BEPID Apple"));
 });
 
 test("remove tag de disciplina quando sigla cobre variacao do nome", () => {
     const tags = inferTags(makeFile("/S01/CA - Calculo I/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf"));
     assert.ok(tags.includes("CA"));
-    assert.ok(!tags.includes("Calculo I"));
+    assert.ok(tags.includes("Calculo I"));
 });
 
 test("nao trata nome scanner com multiplos numeros como parte", () => {
@@ -696,7 +696,7 @@ test("mantem prova para hardware em pasta provas explicita", () => {
 test("inclui sigla resolvida em tags mesmo sem sigla no caminho", () => {
     const tags = inferTags(makeFile("/S04/Processamento Digital de Sinais/2020.2 - Ricardo Rodriges/AP1.png", "AP1.png", "png"));
     assert.ok(tags.includes("PDS"));
-    assert.ok(!tags.includes("Processamento Digital de Sinais"));
+    assert.ok(tags.includes("Processamento Digital de Sinais"));
 });
 
 test("usa fallback contextual para nomes lixo com ids numericos", () => {
@@ -784,8 +784,34 @@ test("classifica extensoes tecnicas novas como projeto", () => {
     assert.equal(inferTipo(idlFile), "Trabalho/Projeto");
     assert.equal(inferTipo(mcpFile), "Trabalho/Projeto");
     const tags = inferTags(mcpFile);
-    assert.ok(tags.includes("Hardware"));
+    assert.ok(!tags.includes("Hardware"));
     assert.ok(tags.includes("Projeto"));
+});
+
+test("prioriza estagio da pasta sobre nome da prova", () => {
+    const file = makeFile(
+        "/S04/PDS - Processamento Digital de Sinais/2017.1 - Ricardo Rodriges/N2/prova 1.jpeg",
+        "prova 1.jpeg",
+        "jpeg",
+    );
+    const tags = inferTags(file);
+    assert.ok(tags.includes("AV2"));
+    assert.ok(!tags.includes("AV1"));
+});
+
+test("remove preposicao orfa apos limpar respostas", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/LIMITES COM RESPOSTAS.pdf", "LIMITES COM RESPOSTAS.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Gabarito - LIMITES");
+});
+
+test("filtra src images com path relativo e barras duplicadas", () => {
+    const file = makeFile("../provas//src/images/figura.png", "figura.png", "png");
+    assert.equal(inferMetadata(file), null);
+});
+
+test("classifica matlab em sistemas lineares como script", () => {
+    const file = makeFile("/S05/SL - Sistemas Lineares/2024.1 - PH/rotacao_cubo.m", "rotacao_cubo.m", "m");
+    assert.equal(inferTipo(file), "Script/Simulação");
 });
 
 test("prefixa gabarito quando categoria vem do contexto", () => {

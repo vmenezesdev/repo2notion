@@ -310,7 +310,8 @@ const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monito
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm", "af", "idl"]);
-const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "pdsit", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof", "qsf", "mcp", "mcs", "mcw"]);
+const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "pdsit", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof", "qsf", "mcp", "mcs", "mcw", "sch"]);
+const HARDWARE_TAG_EXTENSIONS = new Set(["dsn", "bdf", "sch"]);
 const TECHNICAL_SIGLAS = new Set([
     "ED",
     "EA",
@@ -1318,6 +1319,11 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
         return true;
     }
 
+    const hasSrcImagesTrail = normalizedPathParts.some((part, index) => part === "src" && normalizedPathParts[index + 1] === "images");
+    if (hasSrcImagesTrail) {
+        return true;
+    }
+
     if (normalizedPath.includes("/src/") && inferDisciplina(file) === "Geral") {
         return true;
     }
@@ -1365,6 +1371,11 @@ function getAssessmentLabel(nameWithoutExt: string): string {
             return `N${grade}`;
         }
         return `AV${grade}`;
+    }
+
+    const provaNumberMatch = text.match(/\b(?:prova|simulado)\s*[-_ ]?(\d)\b/i);
+    if (provaNumberMatch?.[1]) {
+        return `AV${provaNumberMatch[1]}`;
     }
 
     if (text.includes("final") || /\baf\b/i.test(text)) {
@@ -1449,6 +1460,12 @@ function stripSubjectFromGenericTitle(title: string, subject: string): string {
         .trim();
 
     return stripped || title;
+}
+
+function stripDanglingPrepositions(title: string): string {
+    return normalizeText(title)
+        .replace(/(?:\s+|[-–—:]\s*)(?:com|de|do|da|dos|das|para|por|em|na|no|nas|nos)$/i, "")
+        .trim();
 }
 
 function isLikelyUnmappedProfessorName(candidate: string): boolean {
@@ -1624,6 +1641,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .replace(/\b(gabarito|resolu[cç][aã]o|solu[cç][aã]o|respostas?|answer\s*key|solution|resolvidos)\b/gi, " ")
             .replace(/\s{2,}/g, " ")
             .trim();
+        cleanedName = stripDanglingPrepositions(cleanedName);
     }
 
     const comparableCleanedName = normalizeComparable(cleanedName);
@@ -1986,7 +2004,11 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Administrativo/Estágio";
     }
 
-    if (["m", "py"].includes(extension) && isTechnicalContext(file) && !hasProjetoHint) {
+    if (extension === "m" && !hasProjetoHint) {
+        return "Script/Simulação";
+    }
+
+    if (extension === "py" && isTechnicalContext(file) && !hasProjetoHint) {
         return "Script/Simulação";
     }
 
@@ -2248,8 +2270,18 @@ function inferDisciplinaFromProfessorContext(file: RepoFile | null | undefined):
         /\b(factory|strategy|observer|adapter|decorator|singleton|builder|prototype|command|pattern|padrao|padroes)\b/i,
     ];
 
-    const hasPoHint = poHints.some((pattern) => pattern.test(context));
+    const hasDirectPoFolder = /\b(?:pesquisa\s+e\s+ordenac(?:ao|ão)|ordenac(?:ao|ão))\b/i.test(context);
+    const hasDirectPatternFolder = /\b(?:padroes\s+de\s+projeto|padrões\s+de\s+projeto)\b/i.test(context);
+    const hasPoHint = hasDirectPoFolder || poHints.some((pattern) => pattern.test(context));
     const hasPatternHint = designPatternHints.some((pattern) => pattern.test(context));
+
+    if (hasDirectPoFolder && !hasDirectPatternFolder) {
+        return "Pesquisa e Ordenação";
+    }
+
+    if (hasDirectPatternFolder && !hasDirectPoFolder) {
+        return "Padrões de Projeto";
+    }
 
     if (hasPoHint && !hasPatternHint) {
         return "Pesquisa e Ordenação";
@@ -2363,7 +2395,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Script");
     }
 
-    if (HARDWARE_EXTENSIONS.has(extension)) {
+    if (HARDWARE_TAG_EXTENSIONS.has(extension)) {
         tags.add("Hardware");
     }
 
@@ -2440,11 +2472,18 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         }
     }
 
-    if (upperPath.includes("N1") || /\bP1\b/.test(fileName.toUpperCase())) {
-        tags.add("AV1");
-    }
-    if (upperPath.includes("N2") || /\bP2\b/.test(fileName.toUpperCase())) {
-        tags.add("AV2");
+    const normalizedPathComparable = normalizeComparable(normalizedPath);
+    const normalizedFileNameComparable = normalizeComparable(fileName.replace(/\.[^/.]+$/, ""));
+    const stageFromPathMatch = normalizedPathComparable.match(/(?:^|\/)(n|av|ap|p)\s*([1-4])(?:[._-]\d+)?(?:\/|$)/i);
+    const stageFromNameMatch = normalizedFileNameComparable.match(/\b(?:prova|avaliac(?:ao|ão)|n|av|ap|p)\s*[-_ ]?([1-4])\b/i);
+    const stageFromPath = stageFromPathMatch?.[2] ?? "";
+    const stageFromName = stageFromNameMatch?.[1] ?? "";
+    const resolvedStage = stageFromPath || stageFromName;
+    if (resolvedStage) {
+        for (const assessmentTag of ["AV1", "AV2", "AV3", "AV4"]) {
+            tags.delete(assessmentTag);
+        }
+        tags.add(`AV${resolvedStage}`);
     }
 
     if (/GABARITO/i.test(fileName) || /GABARITO/i.test(normalizedPath)) {
@@ -2480,17 +2519,5 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         return !/^\d+\s*[.)-]\s*/.test(normalizeText(tag));
     });
 
-    const normalizedDisciplina = normalizeComparable(disciplina);
-    const normalizedResolvedDisciplina = normalizeComparable(resolveDisciplinaBySigla(resolvedSigla, normalizedPath));
-    const shouldDropDisciplinaTag =
-        Boolean(resolvedSigla) &&
-        Boolean(normalizedDisciplina) &&
-        (normalizedDisciplina === normalizedResolvedDisciplina ||
-            normalizedDisciplina.startsWith(`${normalizedResolvedDisciplina} `) ||
-            normalizedResolvedDisciplina.startsWith(`${normalizedDisciplina} `));
-
-    const semanticallyDedupedTags = shouldDropDisciplinaTag
-        ? cleanedTags.filter((tag) => normalizeComparable(tag) !== normalizedDisciplina)
-        : cleanedTags;
-    return dedupeTagsByContent(semanticallyDedupedTags, [resolvedSigla, ...KNOWN_PROFESSORS]);
+    return dedupeTagsByContent(cleanedTags, [resolvedSigla, disciplina, ...KNOWN_PROFESSORS]);
 }
