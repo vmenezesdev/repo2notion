@@ -34,9 +34,8 @@ if (!targetDir) {
 // migrateRepo: RepoPath Config -> MigrationResult
 async function migrateRepo(rootPath: string, _options: MigrationOptions): Promise<MigrationResult> {
     const repoTree = await scanRepository(rootPath);
-    console.log("Repository scanned: ", JSON.stringify(repoTree, null, 2));
     const files = removeLfsPaths(collectFiles(repoTree));
-    const recordCandidates = files.map((file) => inferMetadata(file));
+    const recordCandidates = files.map((file) => inferMetadata(file)).filter((candidate) => candidate !== null);
 
     await clearIntermediateResults(
         ["repoTree.json", "files.json", "recordCandidates.json"]
