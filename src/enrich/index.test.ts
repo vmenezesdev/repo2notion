@@ -432,6 +432,15 @@ test("ignora subpastas tecnicas genericas ao inferir disciplina", () => {
     assert.equal(metadata?.disciplina, "Estrutura de Dados");
 });
 
+test("ignora pasta de topico e sobe para disciplina real", () => {
+    const file = makeFile(
+        "/S09/PPD - Programacao Paralela e Distribuida/2023.2 - PH/Trabalho 1 - Sockets/Projeto1.pdf",
+        "Projeto1.pdf",
+        "pdf",
+    );
+    assert.equal(inferDisciplina(file), "Programação Paralela e Distribuída");
+});
+
 test("descarta lixo de pastas db e output_files", () => {
     const dbFile = makeFile("/S01/ED - Eletronica Digital/2022.1 - JB/relogio/db/relogio.cdb", "relogio.cdb", "cdb");
     const outputFile = makeFile("/S01/ED - Eletronica Digital/2022.1 - JB/relogio/output_files/relogio.sof", "relogio.sof", "sof");
@@ -527,8 +536,32 @@ test("preserva ano no inicio de nome de prova", () => {
 });
 
 test("remove colchetes vazios apos limpeza", () => {
-    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/1 [ ] Respostas.pdf", "1 [ ] Respostas.pdf", "pdf");
-    assert.equal(normalizeTitle(file), "Respostas");
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/Lista 1 [v2] - Respostas.pdf", "Lista 1 [v2] - Respostas.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Gabarito - Lista 1");
+});
+
+test("padroniza listagem ordinal para lista numerada", () => {
+    const file = makeFile(
+        "/S01/MI - Mecatronica/2024.1 - PH/2a_listagem_Mecatronica.pdf",
+        "2a_listagem_Mecatronica.pdf",
+        "pdf",
+    );
+    assert.equal(normalizeTitle(file), "Lista 2 - Mecatronica");
+});
+
+test("prioriza nome explicito de pasta sigla-nome sobre mapa de siglas", () => {
+    const file = makeFile("/S03/ED - Equacoes Diferenciais/2024.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Equacoes Diferenciais");
+});
+
+test("descarta extensao db_info como ruído", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/relogio.db_info", "relogio.db_info", "db_info");
+    assert.equal(inferMetadata(file), null);
+});
+
+test("contextualiza titulo generico com professor quando disciplina e geral", () => {
+    const file = makeFile("/Cadeiras com o Ronaldo/material.pdf", "material.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Material - Prof. Ronaldo");
 });
 
 test("usa contexto em imagens genericas de prova", () => {

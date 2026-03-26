@@ -76,6 +76,8 @@ const NOISE_EXTENSIONS = new Set([
     "qpf",
     "qws",
     "sft",
+    "db_info",
+    "db info",
 ]);
 
 const COMPILED_ARTIFACT_EXTENSIONS = new Set([
@@ -194,6 +196,26 @@ const IGNORED_SUBJECT_FOLDERS = new Set([
     "..",
 ]);
 
+const TOPIC_SUBJECT_FOLDERS = new Set([
+    "aula",
+    "aulas",
+    "exercicio",
+    "exercicios",
+    "exercício",
+    "exercícios",
+    "prova",
+    "provas",
+    "projeto",
+    "projetos",
+    "trabalho",
+    "trabalhos",
+    "sockets",
+    "rmi",
+    "corba",
+    "threads",
+    "arduino",
+]);
+
 const GENERIC_CONTEXT_FOLDERS = new Set([
     "src",
     "source",
@@ -251,7 +273,7 @@ const TIPO_PATTERNS = {
         /(\/|\b)(est[aá]gio|estagio|administrativo|secretaria)(\/|\b)/i,
     ],
     gabaritoResolucao: [
-        /(^|\b)(gabarito|resolu[cç][aã]o|solu[cç][aã]o|answer\s*key|solution|resolvidos)(\b|$)/i,
+        /(^|\b)(gabarito|resolu[cç][aã]o|solu[cç][aã]o|respostas?|answer\s*key|solution|resolvidos)(\b|$)/i,
     ],
 };
 
@@ -749,9 +771,10 @@ function getSubjectPart(path: unknown): string {
         const sigla = normalizeSigla(part);
         const isGenericContextFolder =
             GENERIC_CONTEXT_FOLDERS.has(comparable) ||
-            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*$/i.test(comparable);
+            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*(?:\s*[-–—]\s*.+)?$/i.test(comparable);
         const isIgnoredFolder =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
+            TOPIC_SUBJECT_FOLDERS.has(comparable) ||
             isGenericContextFolder ||
             /^s\d{1,2}$/i.test(part) ||
             /^n\d{1,2}$/i.test(part) ||
@@ -871,6 +894,19 @@ function normalizeProfessorName(candidate: string): string {
 
     const threshold = Math.max(1, Math.floor(bestMatch.length * 0.2));
     return bestDistance <= threshold ? bestMatch : normalizedCandidate.toUpperCase();
+}
+
+function inferProfessorFromPath(path: unknown): string {
+    const pathParts = normalizePath(path).split("/").filter(Boolean);
+    for (const part of pathParts) {
+        const comparablePartUpper = normalizeComparable(part).toUpperCase();
+        for (const [alias, canonical] of PROFESSOR_CANONICAL_MAP.entries()) {
+            if (alias.length >= 3 && comparablePartUpper.includes(alias)) {
+                return canonical;
+            }
+        }
+    }
+    return "";
 }
 
 function getSubjectSigla(file: RepoFile | null | undefined): string {
@@ -1169,9 +1205,23 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/\b(?:vers[aã]o\s*)?v\d+(?:\.\d+)?\b/gi, " ")
         .replace(/\bfinal\b/gi, " ")
         .replace(/\beditad[oa]\b/gi, " ")
+        .replace(/\[\s*\]/g, " ")
+        .replace(/\(\s*\)/g, " ")
         .replace(/\s*\(\s*(?:copia|copy)\s*\d*\s*\)\s*$/i, "")
         .replace(/\s+/g, " ")
         .trim();
+
+    const normalizedOriginalName = normalizeComparable(nameWithoutExt);
+    const hasGabaritoHint = /\b(gabarito|answer\s*key|respostas?)\b/i.test(normalizedOriginalName);
+    const hasResolucaoHint = /\b(resolu[cç][aã]o|solu[cç][aã]o|resolvidos|solution)\b/i.test(normalizedOriginalName);
+    const resolutionPrefix = hasGabaritoHint ? "Gabarito" : hasResolucaoHint ? "Resolução" : "";
+
+    if (resolutionPrefix) {
+        cleanedName = cleanedName
+            .replace(/\b(gabarito|resolu[cç][aã]o|solu[cç][aã]o|respostas?|answer\s*key|solution|resolvidos)\b/gi, " ")
+            .replace(/\s{2,}/g, " ")
+            .trim();
+    }
 
     const comparableCleanedName = normalizeComparable(cleanedName);
     if (/^copia(?:\s+de)?\b/.test(comparableCleanedName)) {
@@ -1208,8 +1258,19 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     if (tipo === "Lista de Exercícios") {
-        cleanedName = cleanedName.replace(/^\s*(?:lista)\b[:\-\s]*/i, "").trim();
-        if (/^\d+$/.test(cleanedName)) {
+        const listMarkerMatch = cleanedName.match(
+            /^\s*(?:(\d+)\s*(?:a|ª|o|º)?\s*(?:lista(?:gem)?)|(?:lista(?:gem)?)\s*(\d+))\b[:\-\s]*/i,
+        );
+        const listNumber = listMarkerMatch?.[1] || listMarkerMatch?.[2] || "";
+        if (listMarkerMatch?.[0]) {
+            cleanedName = cleanedName.slice(listMarkerMatch[0].length).replace(/^[-–—:]+\s*/, "").trim();
+        } else {
+            cleanedName = cleanedName.replace(/^\s*(?:lista(?:gem)?)\b[:\-\s]*/i, "").trim();
+        }
+
+        if (listNumber) {
+            cleanedName = cleanedName ? `Lista ${listNumber} - ${cleanedName}` : `Lista ${listNumber}`;
+        } else if (/^\d+$/.test(cleanedName)) {
             cleanedName = `Lista ${cleanedName}`;
         }
     }
@@ -1234,6 +1295,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .replace(/\s{2,}/g, " ")
             .trim();
         let finalBaseTitle = baseTitle || cleanedName;
+        finalBaseTitle = finalBaseTitle.replace(/\s*[-–—:]\s*$/, "").trim();
         if (tipo === "Prova") {
             const reversedNMatch = normalizeComparable(finalBaseTitle).match(/^n\s*(\d+)\s+prova$/i);
             if (reversedNMatch?.[1]) {
@@ -1262,8 +1324,25 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         }
     }
 
-    if (!cleanedName) {
+    if (!cleanedName && !resolutionPrefix) {
         cleanedName = normalizeText(nameWithoutExt);
+    }
+
+    if (resolutionPrefix) {
+        if (!cleanedName || /^\d+$/.test(cleanedName)) {
+            const listNumberFromOriginal =
+                normalizedOriginalName.match(/\blista\s*(\d+)\b/i)?.[1] ||
+                normalizedOriginalName.match(/^\s*(\d+)\b/)?.[1] ||
+                "";
+            if (cleanedName) {
+                cleanedName = `Lista ${cleanedName}`;
+            } else if (listNumberFromOriginal) {
+                cleanedName = `Lista ${listNumberFromOriginal}`;
+            } else {
+                cleanedName = "Material";
+            }
+        }
+        cleanedName = `${resolutionPrefix} - ${cleanedName}`;
     }
 
     if (/^\d{4}\.[12]$/.test(semester)) {
@@ -1361,6 +1440,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const normalizedCleanedName = normalizeComparable(cleanedName);
     const isGenericAssessmentName = /^(?:prova(?:\s+\d+)?|n\s*[1-4]|(?:av|ap|p)\s*[1-4])$/i.test(normalizedCleanedName);
     const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
+    const professor = inferProfessorFromPath(file?.path);
 
     if (
         displaySubject &&
@@ -1397,6 +1477,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             if (contextualParts.length > 1) {
                 return contextualParts.join(" - ");
             }
+        }
+        if (!displaySubject && professor) {
+            return `Material - Prof. ${professor.split(/\s+/)[0]}`;
         }
     }
 
@@ -1528,23 +1611,27 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const { sigla, name } = getSiglaAndName(part);
         const hasLetterInSigla = /[A-Z]/.test(sigla);
         const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(part);
+        const hasGenericPrefix = /^(?:trabalho|projeto|project|atividade|lista|lab|aula)s?\b/i.test(comparable);
         const isGenericContextFolder =
             GENERIC_CONTEXT_FOLDERS.has(comparable) ||
-            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*$/i.test(comparable);
+            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*(?:\s*[-–—]\s*.+)?$/i.test(comparable);
 
         if (isLikelyProfessorFolder(part)) {
             continue;
         }
 
-        if (sigla && hasLetterInSigla) {
+        if (sigla && hasLetterInSigla && !hasGenericPrefix) {
             const resolvedByContext = resolveDisciplinaBySigla(sigla, path);
             if (name) {
                 const normalizedName = normalizeText(name);
                 if (hasExplicitName) {
-                    const hasRomanOrLevelQualifier = /\b(?:[ivxlcdm]+|\d+)\b/i.test(normalizedName);
-                    if (hasRomanOrLevelQualifier || !resolvedByContext) {
-                        return normalizedName;
+                    if (
+                        resolvedByContext &&
+                        normalizeComparable(resolvedByContext).includes(normalizeComparable(normalizedName))
+                    ) {
+                        return resolvedByContext;
                     }
+                    return normalizedName;
                 }
                 if (!resolvedByContext) {
                     return normalizedName;
@@ -1558,6 +1645,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
 
         const isIgnored =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
+            TOPIC_SUBJECT_FOLDERS.has(comparable) ||
             isGenericContextFolder ||
             /^documentos(?:\b|\s*[-_])/i.test(comparable) ||
             /^[sn]\d{1,2}$/i.test(comparable) ||
@@ -1771,6 +1859,9 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     }
 
     if (/GABARITO/i.test(fileName) || /GABARITO/i.test(normalizedPath)) {
+        tags.add("Gabarito");
+    }
+    if (/RESPOSTAS?/i.test(fileName) || /RESPOSTAS?/i.test(normalizedPath)) {
         tags.add("Gabarito");
     }
     if (/RESOLUCAO|RESOLUÇÃO|SOLUCAO|SOLUÇÃO/i.test(fileName) || /RESOLUCAO|RESOLUÇÃO|SOLUCAO|SOLUÇÃO/i.test(normalizedPath)) {
