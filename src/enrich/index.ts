@@ -429,6 +429,7 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     idl: "IDL",
     af: "Automaton",
     m: "MATLAB",
+    fig: "MATLAB",
     ipynb: "Jupyter",
     dsn: "Proteus",
     pdsprj: "Proteus",
@@ -603,6 +604,10 @@ function normalizeComparable(value: unknown): string {
 
 function normalizeSigla(value: unknown): string {
     return normalizeComparable(value).replace(/[^a-z0-9]/g, "").toUpperCase();
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isLikelySigla(sigla: string): boolean {
@@ -1282,6 +1287,80 @@ function getAssessmentLabel(nameWithoutExt: string): string {
     return "";
 }
 
+function getRetakeLabel(value: unknown): string {
+    const text = normalizeComparable(value);
+    if (!text) {
+        return "";
+    }
+
+    if (/(?:^|\b)(?:2\s*(?:a|ª)?\s*chamad[ao]|2chamad[ao]|segunda\s+chamad[ao]|substitutiv[ao])(?:\b|$)/i.test(text)) {
+        if (/substitutiv[ao]/i.test(text)) {
+            return "Substitutiva";
+        }
+        return "2ª Chamada";
+    }
+
+    return "";
+}
+
+function getRetakeLabelFromFile(file: RepoFile | null | undefined): string {
+    return getRetakeLabel(file?.name) || getRetakeLabel(file?.path);
+}
+
+function shouldUseSequentialImagePart(nameWithoutExt: string, sequencePart: string): boolean {
+    if (!sequencePart) {
+        return false;
+    }
+
+    const numericTokens = (nameWithoutExt.match(/\d+/g) ?? []).map((token) => String(Number(token)));
+    const hasScannerLikeSequence = /(?:\d+[ _-]){2,}\d+$/.test(nameWithoutExt);
+    const hasThreeOrMoreNumericTokens = numericTokens.length >= 3;
+    const appearsEarlier = numericTokens.slice(0, -1).includes(sequencePart);
+
+    if (hasThreeOrMoreNumericTokens && (appearsEarlier || hasScannerLikeSequence)) {
+        return false;
+    }
+
+    return true;
+}
+
+function stripSubjectFromGenericTitle(title: string, subject: string): string {
+    if (!title || !subject) {
+        return title;
+    }
+
+    const normalizedTitle = normalizeComparable(title);
+    const normalizedSubject = normalizeComparable(subject);
+    const startsWithGenericLead = /^(?:anotac(?:ao|oes)|anota[cç][oõ]es|resumo|material|apostila|roteiro|slides?)\b/.test(normalizedTitle);
+
+    if (!startsWithGenericLead || !normalizedTitle.includes(normalizedSubject)) {
+        return title;
+    }
+
+    const subjectPattern = new RegExp(`\\b${escapeRegExp(subject)}\\b`, "i");
+    const stripped = title
+        .replace(subjectPattern, " ")
+        .replace(/\s*[-–—:]\s*/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+    return stripped || title;
+}
+
+function isLikelyUnmappedProfessorName(candidate: string): boolean {
+    const normalized = normalizeText(candidate);
+    if (!normalized) {
+        return false;
+    }
+
+    const comparable = normalizeComparable(normalized).toUpperCase();
+    if (PROFESSOR_CANONICAL_MAP.has(comparable)) {
+        return false;
+    }
+
+    return /^[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+){1,3}$/.test(normalized);
+}
+
 /**
  * Dado um arquivo com contexto, inferir os metadados que formarão o registro candidato para o Notion.
  * Produz um registro candidato para o banco do Notion, inferindo título, tipo, disciplina, 
@@ -1367,6 +1446,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const nameWithoutExt = fixMojibake(originalName.replace(/\.[^/.]+$/, ""));
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
     const isImage = IMAGE_EXTENSIONS.has(extension);
+    const retakeLabel = getRetakeLabelFromFile(file);
 
     if (/\bpud\b/i.test(nameWithoutExt) || tipo === "Plano de Ensino") {
         const pudSubject = normalizeText(nameWithoutExt)
@@ -1505,9 +1585,10 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         ? nameWithoutExt.match(/[\-_ ](\d{1,3})$/)
         : null;
     const sequencePart = sequentialSuffixMatch?.[1] ? String(Number(sequentialSuffixMatch[1])) : "";
-    const part = explicitPartMatch?.[1] || (!assessmentLabel ? shortPartMatch?.[1] || "" : "") || sequencePart;
+    const safeSequencePart = shouldUseSequentialImagePart(nameWithoutExt, sequencePart) ? sequencePart : "";
+    const part = explicitPartMatch?.[1] || (!assessmentLabel ? shortPartMatch?.[1] || "" : "") || safeSequencePart;
     const isNumericList = tipo === "Lista de Exercícios" && /^lista\s+\d+$/i.test(cleanedName);
-    const usesSequenceOnlyPart = Boolean(sequencePart && part === sequencePart && !explicitPartMatch && !shortPartMatch?.[1]);
+    const usesSequenceOnlyPart = Boolean(safeSequencePart && part === safeSequencePart && !explicitPartMatch && !shortPartMatch?.[1]);
 
     if (part && !isNumericList) {
         const partPattern = explicitPartMatch
@@ -1531,22 +1612,24 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         }
         const shouldUseContextForShortImageSequence =
             isImage &&
-            sequencePart &&
-            part === sequencePart &&
+            safeSequencePart &&
+            part === safeSequencePart &&
             usesSequenceOnlyPart &&
             finalBaseTitle.length < 10 &&
             /^(?:vs?\d*|prova|n\d+|av\d+|ap\d+|p\d+)$/i.test(normalizeComparable(finalBaseTitle));
         if (shouldUseContextForShortImageSequence) {
             const contextTitle = subject || subjectSigla || finalBaseTitle;
             if (tipo === "Prova") {
-                return `Prova - ${contextTitle} (Parte ${sequencePart.padStart(2, "0")})`;
+                return `Prova - ${contextTitle} (Parte ${safeSequencePart.padStart(2, "0")})`;
             }
-            return `${contextTitle} - Parte ${sequencePart.padStart(2, "0")}`;
+            return `${contextTitle} - Parte ${safeSequencePart.padStart(2, "0")}`;
         }
         if (finalBaseTitle) {
             return `${finalBaseTitle} (Parte ${part})`;
         }
     }
+
+    cleanedName = stripSubjectFromGenericTitle(cleanedName, subject);
 
     if (!cleanedName && !resolutionPrefix) {
         cleanedName = normalizeText(nameWithoutExt);
@@ -1658,8 +1741,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         const sequentialPart = normalizedName.match(/\bn\s*[1-4]\D+(\d+)\b/i)?.[1];
         const part = explicitPart || sequentialPart;
         const base = gradeMatch ? `Prova N${gradeMatch[1]}` : provaNumberMatch?.[1] ? `Prova ${provaNumberMatch[1]}` : "Prova";
+        const baseWithRetake = retakeLabel ? `${base} (${retakeLabel})` : base;
         if (part) {
-            return `${base} (Parte ${part})`;
+            return `${baseWithRetake} (Parte ${part})`;
         }
         if (base === "Prova") {
             const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
@@ -1668,14 +1752,15 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
                 return contextualParts.join(" - ");
             }
         }
-        return base;
+        return baseWithRetake;
     }
 
     if (semester && assessmentLabel) {
+        const assessmentWithRetake = retakeLabel ? `${assessmentLabel} (${retakeLabel})` : assessmentLabel;
         if (subjectSigla) {
-            return `${subjectSigla} - ${assessmentLabel} - ${semester}`;
+            return `${subjectSigla} - ${assessmentWithRetake} - ${semester}`;
         }
-        return `${assessmentLabel} - ${semester}`;
+        return `${assessmentWithRetake} - ${semester}`;
     }
 
     const normalizedCleanedName = normalizeComparable(cleanedName);
@@ -1694,6 +1779,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     if (normalizedCleanedName && subject && normalizedCleanedName === normalizeComparable(subject)) {
+        if (["Material de Aula", "Documentação", "Material Complementar", "Resumo"].includes(tipo)) {
+            return `${subject} - Material Principal`;
+        }
         return subject;
     }
     const isGenericTitle =
@@ -2070,6 +2158,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     const tipo = inferTipo(file);
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
     const upperPath = normalizeComparable(normalizedPath).toUpperCase();
+    const retakeLabel = getRetakeLabelFromFile(file);
 
     if (resolvedSigla) {
         tags.add(resolvedSigla);
@@ -2101,6 +2190,9 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
                 tags.add(provaTag.split(".")[0]);
             }
         }
+        if (retakeLabel) {
+            tags.add(retakeLabel);
+        }
     }
 
     const extensionTag = TAG_BY_EXTENSION[extension];
@@ -2110,6 +2202,10 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
 
     if (["dsn", "pdsprj", "pdsit", "pdsbak", "m", "fig", "bdf", "bsf", "vpr", "sof", "pof", "mcp", "mcs", "mcw", "af"].includes(extension)) {
         tags.add("Simulação");
+    }
+
+    if (extension === "m") {
+        tags.add("Script");
     }
 
     if (HARDWARE_EXTENSIONS.has(extension)) {
@@ -2154,6 +2250,9 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         const normalizedProfessorTag = normalizeProfessorName(profName);
         if (normalizedProfessorTag.length >= 2 && /[A-Z]/.test(normalizedProfessorTag)) {
             tags.add(normalizedProfessorTag);
+        }
+        if (normalizedProfessorTag === normalizeText(profName).toUpperCase() && isLikelyUnmappedProfessorName(profName)) {
+            tags.add("Professor");
         }
     }
 
@@ -2231,7 +2330,9 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     const shouldDropDisciplinaTag =
         Boolean(resolvedSigla) &&
         Boolean(normalizedDisciplina) &&
-        normalizedDisciplina === normalizedResolvedDisciplina;
+        (normalizedDisciplina === normalizedResolvedDisciplina ||
+            normalizedDisciplina.startsWith(`${normalizedResolvedDisciplina} `) ||
+            normalizedResolvedDisciplina.startsWith(`${normalizedDisciplina} `));
 
     const semanticallyDedupedTags = shouldDropDisciplinaTag
         ? cleanedTags.filter((tag) => normalizeComparable(tag) !== normalizedDisciplina)

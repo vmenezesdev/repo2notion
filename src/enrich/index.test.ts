@@ -228,6 +228,17 @@ test("captura rotulos de avaliacao com parcial e nota decimal", () => {
     assert.ok(af.includes("AF"));
 });
 
+test("reconhece segunda chamada no titulo e nas tags", () => {
+    const file = makeFile(
+        "/S01/IP - Introducao a Programacao/2024.2 - PH/AV1_2chamada.pdf",
+        "AV1_2chamada.pdf",
+        "pdf",
+    );
+    assert.equal(normalizeTitle(file), "IP - AV1 (2ª Chamada) - 2024.2");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("2ª Chamada"));
+});
+
 test("classifica binarios de firmware como hardware/projeto", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.hex", "projeto_final.hex", "hex");
     assert.equal(inferTipo(file), "Trabalho/Projeto");
@@ -248,6 +259,14 @@ test("classifica fig como simulacao", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/lab_01.fig", "lab_01.fig", "fig");
     const tags = inferTags(file);
     assert.ok(tags.includes("Simulação"));
+    assert.ok(tags.includes("MATLAB"));
+});
+
+test("marca arquivo m como matlab e script", () => {
+    const file = makeFile("/S05/CN - Calculo Numerico/2022.1 - PH/metodo_newton.m", "metodo_newton.m", "m");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("MATLAB"));
+    assert.ok(tags.includes("Script"));
 });
 
 test("classifica extensoes de quartus como hardware e simulacao", () => {
@@ -561,6 +580,35 @@ test("remove tags redundantes quando sigla ja representa disciplina", () => {
     const tags = inferTags(makeFile("/BEPID-Apple/2014/Projeto 1.docx", "Projeto 1.docx", "docx"));
     assert.ok(tags.includes("BEPID"));
     assert.ok(!tags.includes("BEPID Apple"));
+});
+
+test("remove tag de disciplina quando sigla cobre variacao do nome", () => {
+    const tags = inferTags(makeFile("/S01/CA - Calculo I/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf"));
+    assert.ok(tags.includes("CA"));
+    assert.ok(!tags.includes("Calculo I"));
+});
+
+test("nao trata nome scanner com multiplos numeros como parte", () => {
+    const file = makeFile("/S02/CA - Calculo II/2024.1 - PH/cal 2-1-2.jpg", "cal 2-1-2.jpg", "jpg");
+    const title = normalizeTitle(file);
+    assert.ok(!title.includes("(Parte"));
+});
+
+test("adiciona tag generica professor para docente nao mapeado", () => {
+    const file = makeFile("/S02/LM - Logica Matematica/2024.1 - Joao Gabriel Silva/Anotacoes.pdf", "Anotacoes.pdf", "pdf");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("Professor"));
+    assert.ok(tags.includes("JOAO GABRIEL SILVA"));
+});
+
+test("remove nome da disciplina de titulo generico de anotacoes", () => {
+    const file = makeFile("/S02/LM - Logica Matematica/2024.1 - PH/Anotações Lógica Matemática.pdf", "Anotações Lógica Matemática.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Anotações");
+});
+
+test("enriquece titulo quando igual a disciplina", () => {
+    const file = makeFile("../provas/S01/CA - Cálculo I/2010.2/calculo I.pdf", "calculo I.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Cálculo I - Material Principal");
 });
 
 test("filtra arquivos de sistema e temporarios do Word", () => {
