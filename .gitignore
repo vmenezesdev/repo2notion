@@ -163,3 +163,4 @@ vite.config.ts.timestamp-*
 # Intermediate results
 repoTree.json
 files.json
+recordCandidates.json
