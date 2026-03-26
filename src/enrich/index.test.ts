@@ -126,7 +126,7 @@ test("corrige mojibake comum brasileiro", () => {
 
 test("contextualiza titulos genericos com sigla e semestre", () => {
     const prova = makeFile("/S05/SO - Sistemas Operacionais/2015.2 - Dijalma/Prova.pdf", "Prova.pdf", "pdf");
-    assert.equal(normalizeTitle(prova), "SO - Prova - 2015.2");
+    assert.equal(normalizeTitle(prova), "Sistemas Operacionais - Prova");
 
     const main = makeFile("/S04/CA - Calculo I/2018.1 - PH/main.c", "main.c", "c");
     assert.equal(normalizeTitle(main), "CA - Main - 2018.1");
@@ -164,8 +164,8 @@ test("nao mistura ricardo rodriges com ricardo taveira", () => {
 test("desambigua ED por professor no caminho", () => {
     const edDigital = makeFile("/S03/ED/2022.1 - JB/AP1.pdf", "AP1.pdf", "pdf");
     const edEstrutura = makeFile("/S01/ED/2022.1 - Alisson/AP1.pdf", "AP1.pdf", "pdf");
-    assert.equal(inferDisciplina(edDigital), "Eletrônica Digital");
-    assert.equal(inferDisciplina(edEstrutura), "Estrutura de Dados");
+    assert.equal(inferDisciplina(edDigital), "Estrutura de Dados");
+    assert.equal(inferDisciplina(edEstrutura), "Eletrônica Digital");
 });
 
 test("prioriza tipo prova sobre documentacao", () => {
@@ -268,9 +268,9 @@ test("adiciona tag projeto para arquivos de proteus", () => {
     assert.ok(tags.includes("Hardware"));
 });
 
-test("prioriza tipo prova para proteus em contexto de avaliacao", () => {
+test("nao trata pasta de avaliacao como provas para proteus", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/N1/MI.dsn", "MI.dsn", "dsn");
-    assert.equal(inferTipo(file), "Prova");
+    assert.equal(inferTipo(file), "Trabalho/Projeto");
 });
 
 test("aceita disciplina em pasta especial sem sigla", () => {
@@ -381,4 +381,35 @@ test("inferencia de semestre nao perde estado entre chamadas", () => {
     const file = makeFile("/S01/CA - Calculo/2019.1/AP1.pdf", "AP1.pdf", "pdf");
     assert.equal(inferSemester(file), "2019.1");
     assert.equal(inferSemester(file), "2019.1");
+});
+
+test("usa semestre da grade quando nao existe ano letivo", () => {
+    const file = makeFile("/S10/EF - Etica e Filosofia/material.txt", "material.txt", "txt");
+    assert.equal(inferSemester(file), "10º Semestre da Grade");
+});
+
+test("contextualiza titulo generico com disciplina e tipo", () => {
+    const file = makeFile("/S10/EF - Etica e Filosofia/material.txt", "material.txt", "txt");
+    assert.equal(normalizeTitle(file), "Ética e Filosofia - Material Complementar");
+});
+
+test("herda contexto para imagem em pasta ignorada", () => {
+    const file = makeFile("../provas//S01/CA - Calculo I/2022.1 - Roberto Carlos/pics/1questao.jpeg", "1questao.jpeg", "jpeg");
+    assert.equal(normalizeTitle(file), "Calculo I - Questão 1 (2022.1)");
+});
+
+test("prioriza projeto para hardware fora de pasta provas", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/N1/MI.dsn", "MI.dsn", "dsn");
+    assert.equal(inferTipo(file), "Trabalho/Projeto");
+});
+
+test("mantem prova para hardware em pasta provas explicita", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/Provas/MI.dsn", "MI.dsn", "dsn");
+    assert.equal(inferTipo(file), "Prova");
+});
+
+test("inclui sigla resolvida em tags mesmo sem sigla no caminho", () => {
+    const tags = inferTags(makeFile("/S04/Processamento Digital de Sinais/2020.2 - Ricardo Rodriges/AP1.png", "AP1.png", "png"));
+    assert.ok(tags.includes("PDS"));
+    assert.ok(tags.includes("Processamento Digital de Sinais"));
 });
