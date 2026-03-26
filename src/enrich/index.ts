@@ -502,10 +502,10 @@ function safeString(value: unknown): string {
 }
 
 const MOJIBAKE_REPLACEMENTS: Array<[RegExp, string]> = [
-    [/Ã_cios/g, "ícios"],
-    [/Ã_cio/g, "ício"],
-    [/Ã_cias/g, "ícias"],
-    [/Ã_cia/g, "ícia"],
+    [/Ã[_\s]cios/g, "ícios"],
+    [/Ã[_\s]cio/g, "ício"],
+    [/Ã[_\s]cias/g, "ícias"],
+    [/Ã[_\s]cia/g, "ícia"],
     // BUG FIX #3: Add more specific patterns before the generic Ã_ pattern
     [/Ã_o/g, "ão"],
     [/Ã_e/g, "ê"],
@@ -656,6 +656,10 @@ function normalizeSigla(value: unknown): string {
 
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildUnicodeWholeWordRegex(term: string): RegExp {
+    return new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(term)})(?=$|[^\\p{L}\\p{N}])`, "iu");
 }
 
 function isLikelySigla(sigla: string): boolean {
@@ -825,7 +829,7 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     if (sigla === "CA" || sigla === "CALC") {
         const calculoLevel = inferCalculoLevelFromPath(path);
         if (calculoLevel) {
-            return `Calculo ${calculoLevel}`;
+            return `Cálculo ${calculoLevel}`;
         }
     }
 
@@ -1018,7 +1022,7 @@ function isLikelyDate(nameWithoutExt: string): boolean {
         return false;
     }
     // Date patterns: YYYYMMDD, YYYY.MM.DD, YYYY-MM-DD, YYYYMMDDHHMMSS, etc.
-    return /\b(?:19|20)\d{2}[._/-]?\d{2}[._/-]?\d{2}(?:[t\s_-]?\d{2}[._:-]\d{2}(?:[._:-]\d{2})?)?\b/i.test(normalized);
+    return /\b(?:19|20)\d{2}[._/-]?\d{1,2}[._/-]?\d{1,2}(?:[t\s_-]?\d{2}[._:-]\d{2}(?:[._:-]\d{2})?)?\b/i.test(normalized);
 }
 
 function isGarbageIdLikeName(nameWithoutExt: string): boolean {
@@ -1648,6 +1652,11 @@ function shouldUseSequentialImagePart(nameWithoutExt: string, sequencePart: stri
         return false;
     }
 
+    const normalizedName = normalizeComparable(nameWithoutExt);
+    if (/^(?:n|av|ap|p|vs)\s*\d+(?:\.\d+)?$/i.test(normalizedName)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -1672,20 +1681,9 @@ function stripSubjectFromGenericTitle(title: string, subject: string): string {
         return title;
     }
 
-    // BUG FIX #5: Apply stripDiacritics to both subject and title for proper matching
-    // This fixes cases like "Anotações Eletrônica Digital" where accents were preventing removal
-    const subjectDiacriticsStripped = stripDiacritics(subject);
-    const titleDiacriticsStripped = stripDiacritics(title);
-    
-    // Try matching with original subject first
-    let stripped = title.replace(new RegExp(`\\b${escapeRegExp(subject)}\\b`, "i"), " ");
-    
-    // If the original didn't match, try with diacritics stripped
-    if (stripped === title && titleDiacriticsStripped !== title) {
-        stripped = titleDiacriticsStripped.replace(new RegExp(`\\b${escapeRegExp(subjectDiacriticsStripped)}\\b`, "i"), " ");
-    }
-    
-    stripped = stripped
+    const subjectRegex = buildUnicodeWholeWordRegex(subject);
+    const stripped = title
+        .replace(subjectRegex, "$1")
         .replace(/\s*[-–—:]\s*/g, " ")
         .replace(/\s{2,}/g, " ")
         .trim();
@@ -1820,7 +1818,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             // BUG FIX #1: More conservative professor removal - don't remove multi-word discipline names
             // Only remove names that are clearly professor names (preceded by Prof/Professor, or single names)
             // This prevents removing "Álgebra Linear", "Geometria Analítica", "Inteligência Artificial", etc.
-            .replace(/\bprof(?:essor)?\s+[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+){0,2}\s*$/i, "") // Only 1-3 words after Prof
+            .replace(/\bprof(?:essor)?\.?\s+[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+){0,2}(?=\s*(?:$|[-–—,:]|\d{4}(?:[._\-\s]?[12])?))/gi, " ")
             .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
             .replace(/\s{2,}/g, " ")
             .trim();
@@ -1843,8 +1841,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/\b\d{7,}\b/g, "")
         .replace(/^\d{5,}(?=[A-Za-z])/, "")
         .replace(/^(?:\d+\s*[-–—]\s*)/, "")
-        // BUG FIX #7: Improved extension removal - match only complete extensions with dot prefix at end of line
-        .replace(/\.(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)$/gi, "")
+        .replace(/\s*\.\s*(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)$/gi, "")
         .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
         .replace(/^(?!(?:19|20)\d{2}(?:\b|[.\-_]))(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*|\d+\s+)/, "")
         .replace(/[._\-]/g, " ")
@@ -2805,6 +2802,15 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
 
     for (const stage of allResolvedStages) {
         tags.add(`AV${stage}`);
+    }
+
+    if (allResolvedStages.size > 0) {
+        for (const tag of Array.from(tags)) {
+            const avStageMatch = tag.match(/^AV([1-4])(?:\.\d+)?$/i);
+            if (avStageMatch && !allResolvedStages.has(avStageMatch[1])) {
+                tags.delete(tag);
+            }
+        }
     }
 
     if (/GABARITO/i.test(fileName) || /GABARITO/i.test(normalizedPath)) {
