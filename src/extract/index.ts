@@ -13,3 +13,8 @@ export function collectFiles(node: RepoNode): RepoFile[] {
         return [];
     }
 }
+
+export function removeLfsPaths(files: RepoFile[]): RepoFile[] {
+    // .git/lfs/
+    return files.filter((file) => !file.path.includes(".git/lfs/"));
+}

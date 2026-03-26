@@ -10,7 +10,8 @@ import { MigrationOptions, MigrationResult, RepoDirectory, RepoNode } from "./ty
 import { scanRepository } from "./scan";
 import { clearIntermediateResults, saveIntermediateResult } from "./util";
 import { clear } from "node:console";
-import { collectFiles } from "./extract";
+import { collectFiles, removeLfsPaths } from "./extract";
+import { inferMetadata } from "./enrich";
 
 
 console.log("repo2notion starting...");
@@ -34,17 +35,15 @@ if (!targetDir) {
 async function migrateRepo(rootPath: string, _options: MigrationOptions): Promise<MigrationResult> {
     const repoTree = await scanRepository(rootPath);
     console.log("Repository scanned: ", JSON.stringify(repoTree, null, 2));
-    const files = collectFiles(repoTree);
-
-
-    // const migrationPlan = buildMigrationPlan(repoTree, options);
-    // const result = await executeMigrationPlan(migrationPlan, options);
+    const files = removeLfsPaths(collectFiles(repoTree));
+    const recordCandidates = files.map((file) => inferMetadata(file));
 
     await clearIntermediateResults(
-        ["repoTree.json", "files.json"]
+        ["repoTree.json", "files.json", "recordCandidates.json"]
     );
     await saveIntermediateResult("repoTree.json", repoTree);
     await saveIntermediateResult("files.json", files);
+    await saveIntermediateResult("recordCandidates.json", recordCandidates);
 
     // return result;
 
