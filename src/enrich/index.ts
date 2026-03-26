@@ -587,7 +587,7 @@ function fixMojibake(value: unknown): string {
     const hasMojibakeHints =
         /Ã[\u0080-\u00BF]/.test(safeValue) ||
         /Â[\u0080-\u00BF]/.test(safeValue) ||
-        /Ã[_^?($]/.test(safeValue) ||
+        /Ã[_^?($\s]/.test(safeValue) || // BUG FIX #2: Include space character
         /�/.test(safeValue);
 
     if (!hasMojibakeHints) {
@@ -827,15 +827,33 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
         }
     }
 
+    // BUG FIX #4: Add support for "PP" (Padrões de Projeto) when in design patterns context
+    if (sigla === "PP") {
+        const designPatternKeywords = /\b(?:abstract_factory|adapter|bridge|builder|chain_?of_?responsibility|command|composite|decorator|facade|factory|flyweight|interpreter|iterator|mediator|memento|observer|prototype|proxy|singleton|state|strategy|template|visitor|design\s*patterns?|padroes?\s*de\s*projeto)\b/i;
+        if (designPatternKeywords.test(normalizedPath)) {
+            return "Padrões de Projeto";
+        }
+        // Otherwise fallback to the default mapping
+        return "Paradigmas de Programação";
+    }
+
     if (sigla === "ED") {
+        // BUG FIX #6: Check CONTEXT FIRST before using semester heuristic
+        // This prevents misclassification of "Eletrônica Digital" in S3+ as "Estrutura de Dados"
         if (/\bESTRUTURA\b|\bDADOS\b/.test(normalizedPath)) {
             return "Estrutura de Dados";
         }
         if (/\bELETRONICA\b|\bDIGITAL\b/.test(normalizedPath)) {
             return "Eletrônica Digital";
         }
-        // BUG FIX #7: Make ED detection more robust
-        // Use semester >= 3 for Estrutura de Dados (more reliable than hardcoded professor names)
+        // Check professor associations (most reliable for ED ambiguity)
+        if (/\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
+            return "Estrutura de Dados";
+        }
+        if (/\bJB\b|\bJOACIL+O\b/.test(normalizedPath)) {
+            return "Eletrônica Digital";
+        }
+        // Use semester as LAST resort, not as primary heuristic
         if (semesterNumber !== null) {
             if (semesterNumber >= 3) {
                 return "Estrutura de Dados";
@@ -843,13 +861,6 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
             if (semesterNumber <= 2) {
                 return "Eletrônica Digital";
             }
-        }
-        // Still keep professor-based fallback but include new names
-        if (/\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
-            return "Estrutura de Dados";
-        }
-        if (/\bJB\b|\bJOACIL+O\b/.test(normalizedPath)) {
-            return "Eletrônica Digital";
         }
     }
 
@@ -1583,9 +1594,20 @@ function stripSubjectFromGenericTitle(title: string, subject: string): string {
         return title;
     }
 
-    const subjectPattern = new RegExp(`\\b${escapeRegExp(subject)}\\b`, "i");
-    const stripped = title
-        .replace(subjectPattern, " ")
+    // BUG FIX #5: Apply stripDiacritics to both subject and title for proper matching
+    // This fixes cases like "Anotações Eletrônica Digital" where accents were preventing removal
+    const subjectDiacriticsStripped = stripDiacritics(subject);
+    const titleDiacriticsStripped = stripDiacritics(title);
+    
+    // Try matching with original subject first
+    let stripped = title.replace(new RegExp(`\\b${escapeRegExp(subject)}\\b`, "i"), " ");
+    
+    // If the original didn't match, try with diacritics stripped
+    if (stripped === title && titleDiacriticsStripped !== title) {
+        stripped = titleDiacriticsStripped.replace(new RegExp(`\\b${escapeRegExp(subjectDiacriticsStripped)}\\b`, "i"), " ");
+    }
+    
+    stripped = stripped
         .replace(/\s*[-–—:]\s*/g, " ")
         .replace(/\s{2,}/g, " ")
         .trim();
@@ -1717,8 +1739,10 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .replace(/^\s*(?:pud|plano\s+de\s+ensino)\b\s*[-–—:]?\s*/i, "")
             .replace(/\b(?:o\s+)?pud\b/gi, "")
             .replace(/\bplano\s+de\s+ensino\b/gi, "")
-            // BUG FIX #8: Remove professor names from PUD titles
-            .replace(/\b(?:prof(?:essor)?\s+)?[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+){1,3}\s*$/i, "")
+            // BUG FIX #1: More conservative professor removal - don't remove multi-word discipline names
+            // Only remove names that are clearly professor names (preceded by Prof/Professor, or single names)
+            // This prevents removing "Álgebra Linear", "Geometria Analítica", "Inteligência Artificial", etc.
+            .replace(/\bprof(?:essor)?\s+[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+){0,2}\s*$/i, "") // Only 1-3 words after Prof
             .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
             .replace(/\s{2,}/g, " ")
             .trim();
@@ -1741,7 +1765,8 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/\b\d{7,}\b/g, "")
         .replace(/^\d{5,}(?=[A-Za-z])/, "")
         .replace(/^(?:\d+\s*[-–—]\s*)/, "")
-        .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
+        // BUG FIX #7: Improved extension removal - match only complete extensions with dot prefix at end of line
+        .replace(/\.(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)$/gi, "")
         .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
         .replace(/^(?!(?:19|20)\d{2}(?:\b|[.\-_]))(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*|\d+\s+)/, "")
         .replace(/[._\-]/g, " ")
@@ -1831,6 +1856,11 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             cleanedName = cleanedName.slice(listMarkerMatch[0].length).replace(/^[-–—:]+\s*/, "").trim();
         } else {
             cleanedName = cleanedName.replace(/^\s*(?:lista(?:gem)?(?:\s*de)?)\b[:\-\s]*/i, "").trim();
+        }
+
+        // BUG FIX #3: Remove duplicate list number if it appears at the start of cleanedName
+        if (listNumber && cleanedName.startsWith(listNumber)) {
+            cleanedName = cleanedName.replace(new RegExp(`^${escapeRegExp(listNumber)}\\s*[-–—]?\\s*`, "i"), "").trim();
         }
 
         if (listNumber) {
