@@ -504,6 +504,9 @@ const MOJIBAKE_REPLACEMENTS: Array<[RegExp, string]> = [
     [/Ã_cio/g, "ício"],
     [/Ã_cias/g, "ícias"],
     [/Ã_cia/g, "ícia"],
+    // BUG FIX #3: Add more specific patterns before the generic Ã_ pattern
+    [/Ã_o/g, "ão"],
+    [/Ã_e/g, "ê"],
     [/Ã§Ã£/g, "çã"],
     [/Ã£o/g, "ão"],
     [/Ã¡/g, "á"],
@@ -616,12 +619,29 @@ function normalizeText(value: unknown): string {
 }
 
 function splitJoinedTitleTokens(value: string): string {
-    return value
-    .replace(/([a-zà-ÿ]+)([A-ZÀ-Ý][a-zà-ÿ])/g, "$1 $2")
+    // BUG FIX #6: Don't split technical terms and acronyms
+    // Preserve common technical terms like LaTeX, GitHub, iPhone, macOS
+    const technicalTerms = /\b(?:LaTeX|GitHub|iPhone|macOS|WiFi|JavaScript|TypeScript|PowerPoint|YouTube|OpenGL|PyTorch|TensorFlow|OpenSSL|OpenAI)\b/g;
+    const preserved = new Map<string, string>();
+    let placeholder = 0;
+    let processedValue = value.replace(technicalTerms, (match) => {
+        const key = `__TECH_${placeholder++}__`;
+        preserved.set(key, match);
+        return key;
+    });
+    
+    const result = processedValue
+        .replace(/([a-zà-ÿ]+)([A-ZÀ-Ý][a-zà-ÿ])/g, "$1 $2")
         .replace(/([A-ZÀ-Ý])([A-ZÀ-Ý][a-zà-ÿ])/g, "$1 $2")
         .replace(/\blistade\b/gi, "lista de")
         .replace(/\s+/g, " ")
         .trim();
+    
+    let final = result;
+    for (const [key, term] of preserved) {
+        final = final.replace(key, term);
+    }
+    return final;
 }
 
 function normalizeComparable(value: unknown): string {
@@ -675,10 +695,12 @@ function hasKnownProfessorAlias(value: unknown): boolean {
     }
 
     for (const alias of PROFESSOR_CANONICAL_MAP.keys()) {
-        if (alias.length < 3) {
-            continue;
-        }
+        // Allow exact matches for all aliases, including short ones like JB and PH
         if (comparableValue === alias || comparableValue.includes(` ${alias} `) || comparableValue.endsWith(` ${alias}`)) {
+            return true;
+        }
+        // For longer aliases (3+ chars), also check substring patterns
+        if (alias.length >= 3 && comparableValue.includes(alias)) {
             return true;
         }
     }
@@ -812,14 +834,17 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
         if (/\bELETRONICA\b|\bDIGITAL\b/.test(normalizedPath)) {
             return "Eletrônica Digital";
         }
-
-        if (semesterNumber === 1 || semesterNumber === 2) {
-            return "Eletrônica Digital";
+        // BUG FIX #7: Make ED detection more robust
+        // Use semester >= 3 for Estrutura de Dados (more reliable than hardcoded professor names)
+        if (semesterNumber !== null) {
+            if (semesterNumber >= 3) {
+                return "Estrutura de Dados";
+            }
+            if (semesterNumber <= 2) {
+                return "Eletrônica Digital";
+            }
         }
-        if (semesterNumber === 3) {
-            return "Estrutura de Dados";
-        }
-
+        // Still keep professor-based fallback but include new names
         if (/\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
             return "Estrutura de Dados";
         }
@@ -941,9 +966,25 @@ function inferDisciplinaFromRepositoryRoot(path: unknown): string {
     return "";
 }
 
+function isLikelyDate(nameWithoutExt: string): boolean {
+    // BUG FIX #4a: Helper function to detect date patterns in filenames
+    // Matches: 20231025, 2023.10.25, 2023-10-25, 20231025143000, etc.
+    const normalized = normalizeText(nameWithoutExt);
+    if (!normalized) {
+        return false;
+    }
+    // Date patterns: YYYYMMDD, YYYY.MM.DD, YYYY-MM-DD, YYYYMMDDHHMMSS, etc.
+    return /\b(?:19|20)\d{2}[._/-]?\d{2}[._/-]?\d{2}(?:[t\s_-]?\d{2}[._:-]\d{2}(?:[._:-]\d{2})?)?\b/i.test(normalized);
+}
+
 function isGarbageIdLikeName(nameWithoutExt: string): boolean {
     const normalized = normalizeText(nameWithoutExt);
     if (!normalized) {
+        return false;
+    }
+
+    // BUG FIX #4: Check for dates first before marking as garbage
+    if (isLikelyDate(nameWithoutExt)) {
         return false;
     }
 
@@ -1081,8 +1122,19 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s*[-–—_]\s*/);
-    const sigla = normalizeSigla(siglaRaw ?? "");
-    const name = nameParts.join(" - ").trim();
+    let sigla = normalizeSigla(siglaRaw ?? "");
+    let name = nameParts.join(" - ").trim();
+
+    // BUG FIX #2: Validate if siglaRaw starts with numbers (e.g., "1. Decodificador BCD")
+    // If sigla contains or starts with digits, it's likely not a valid course abbreviation
+    if (/^\d/.test(siglaRaw ?? "") || !isLikelySigla(sigla)) {
+        // Try to check if the name part is actually a valid discipline
+        const potentialName = normalizedSubject.trim();
+        if (potentialName && nameParts.length === 0) {
+            return { sigla: "", name: potentialName };
+        }
+        sigla = "";
+    }
 
     if (!name && normalizedSubject && DISCIPLINA_BY_SIGLA[sigla]) {
         return { sigla, name: DISCIPLINA_BY_SIGLA[sigla] };
@@ -1172,6 +1224,11 @@ function inferProfessorFromPath(path: unknown): string {
     for (const part of pathParts) {
         const comparablePartUpper = normalizeComparable(part).toUpperCase();
         for (const [alias, canonical] of PROFESSOR_CANONICAL_MAP.entries()) {
+            // Check for exact match or word boundary match
+            if (comparablePartUpper === alias || comparablePartUpper.includes(` ${alias} `) || comparablePartUpper.endsWith(` ${alias}`)) {
+                return canonical;
+            }
+            // For longer aliases (3+ chars), also check substring patterns
             if (alias.length >= 3 && comparablePartUpper.includes(alias)) {
                 return canonical;
             }
@@ -1208,7 +1265,7 @@ function inferGenericTitleTypeLabel(tipo: string): string {
 }
 
 function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefined, normalizedName: string): string {
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
     if (!IMAGE_EXTENSIONS.has(extension) || !isIgnoredContainerFolder(file?.path)) {
         return "";
     }
@@ -1347,6 +1404,26 @@ function isTechnicalContext(file: RepoFile | null | undefined): boolean {
     return false;
 }
 
+function getSafeExtension(file: RepoFile | null | undefined): string {
+    // BUG FIX #5: Re-extract extension from name if the extension field is unreliable
+    if (!file) {
+        return "";
+    }
+    
+    const name = safeString(file.name);
+    const extension = safeString(file.extension);
+    
+    // Try to extract from the extension field first
+    let ext = normalizeComparable(extension).replace(/^\./, "");
+    if (ext) {
+        return ext;
+    }
+    
+    // If extension field is empty/unreliable, extract from name
+    const nameMatch = name.match(/\.([a-z0-9]+)$/i);
+    return nameMatch ? normalizeComparable(nameMatch[1]) : "";
+}
+
 function isNoiseFile(file: RepoFile | null | undefined): boolean {
     const normalizedPath = `/${normalizeComparable(normalizePath(file?.path))}/`;
     const normalizedPathParts = normalizePath(file?.path)
@@ -1355,7 +1432,7 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
         .map((part) => normalizeComparable(part));
     const normalizedName = normalizeComparable(file?.name);
     const normalizedStem = normalizeComparable(safeString(file?.name).replace(/\.[^/.]+$/, ""));
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
 
     const isReadme = normalizedName === "readme.md" || normalizedStem === "readme";
     if (isReadme) {
@@ -1396,7 +1473,7 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
 }
 
 function isCodeFile(file: RepoFile | null | undefined): boolean {
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
     return CODE_EXTENSIONS.has(extension);
 }
 
@@ -1580,7 +1657,7 @@ export function inferMetadata(
         return null;
     }
 
-    const extension = normalizeComparable(normalizedFile.extension).replace(/^\./, "");
+    const extension = getSafeExtension(normalizedFile);
     const tipo = inferTipo(normalizedFile);
     const disciplina = inferDisciplina(normalizedFile);
     const shouldFilterCodeFiles = options?.filterCodeFiles ?? true;
@@ -1597,13 +1674,16 @@ export function inferMetadata(
         /\b(?:projeto|project|trabalho|atividade|lab(?:orat[oó]rio)?)\b/.test(normalizedPath) ||
         /\b(?:projeto|project|trabalho|atividade|lab(?:orat[oó]rio)?)\b/.test(normalizedName);
     const isProfessorScopedContext = /^outros\s*-\s*prof\./i.test(normalizeComparable(disciplina));
+    // BUG FIX #9: Be more lenient with code files - only filter if genuinely unrelated
+    const hasAcademicContext = /\b(?:prova|lista|trabalho|projeto|atividade|lab|exerc|resoluc)\b/i.test(normalizedPath + normalizedName) || isTechnicalContext(normalizedFile);
 
     if (
         shouldFilterCodeFiles &&
         isCodeFile(normalizedFile) &&
         !isTechnicalContext(normalizedFile) &&
         !hasProjetoOuTrabalhoHint &&
-        !isProfessorScopedContext
+        !isProfessorScopedContext &&
+        !hasAcademicContext
     ) {
         return null;
     }
@@ -1627,7 +1707,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const tipo = inferTipo(file);
     const originalName = safeString(file?.name);
     const nameWithoutExt = fixMojibake(originalName.replace(/\.[^/.]+$/, ""));
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
     const isImage = IMAGE_EXTENSIONS.has(extension);
     const retakeLabel = getRetakeLabelFromFile(file);
 
@@ -1637,6 +1717,8 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .replace(/^\s*(?:pud|plano\s+de\s+ensino)\b\s*[-–—:]?\s*/i, "")
             .replace(/\b(?:o\s+)?pud\b/gi, "")
             .replace(/\bplano\s+de\s+ensino\b/gi, "")
+            // BUG FIX #8: Remove professor names from PUD titles
+            .replace(/\b(?:prof(?:essor)?\s+)?[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+){1,3}\s*$/i, "")
             .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
             .replace(/\s{2,}/g, " ")
             .trim();
@@ -2011,7 +2093,7 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         .replace(/listade/gi, "lista de");
     const normalizedPath = normalizePath(file?.path);
     const path = normalizeComparable(normalizedPath);
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
     const pathParts = normalizedPath
         .split("/")
         .filter(Boolean)
@@ -2328,7 +2410,7 @@ function inferDisciplinaFromProfessorContext(file: RepoFile | null | undefined):
         return "";
     }
 
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
     const context = `${normalizeComparable(path)} ${normalizeComparable(file?.name)}`;
     const poHints = [
         /\bbubble\s*sort\b/i,
@@ -2416,7 +2498,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     const resolvedSigla = isLikelySigla(sigla) ? sigla : getResolvedSiglaFromDisciplina(disciplina);
     const semester = inferSemester(file);
     const tipo = inferTipo(file);
-    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const extension = getSafeExtension(file);
     const upperPath = normalizeComparable(normalizedPath).toUpperCase();
     const retakeLabel = getRetakeLabelFromFile(file);
 
