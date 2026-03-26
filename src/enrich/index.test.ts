@@ -40,6 +40,10 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S08/PDI - Processamento Digital de Imagens/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Processamento Digital de Imagens");
     assert.equal(inferDisciplina(makeFile("/S10/TGI - Trabalho de Graduacao Interdisciplinar/2024.1 - PH/TGI.pdf", "TGI.pdf", "pdf")), "Trabalho de Graduação Interdisciplinar");
     assert.equal(inferDisciplina(makeFile("/S02/PS - Projeto Social/2024.1 - PH/Relatorio.pdf", "Relatorio.pdf", "pdf")), "Projeto Social");
+    assert.equal(inferDisciplina(makeFile("/S06/PO - Pesquisa e Ordenacao/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Pesquisa e Ordenação");
+    assert.equal(inferDisciplina(makeFile("/S06/PEO - Pesquisa e Ordenacao/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Pesquisa e Ordenação");
+    assert.equal(inferDisciplina(makeFile("/S08/IC - Inteligencia Computacional/2024.1 - PH/Projeto.pdf", "Projeto.pdf", "pdf")), "Inteligência Computacional");
+    assert.equal(inferDisciplina(makeFile("/S05/IAI - Introducao a Automacao Industrial/2023.1 - PH/Relatorio.pdf", "Relatorio.pdf", "pdf")), "Introdução à Automação Industrial");
 });
 
 test("ignora pastas genericas na inferencia de disciplina", () => {
@@ -99,7 +103,7 @@ test("nao interpreta timestamp como parte", () => {
         "P_20170530_141545.jpg",
         "jpg",
     );
-    assert.equal(normalizeTitle(file), "Prova");
+    assert.equal(normalizeTitle(file), "Cálculo - Prova - 2017.1");
 });
 
 test("preserva nome descritivo em imagem de prova", () => {
@@ -126,7 +130,7 @@ test("corrige mojibake comum brasileiro", () => {
 
 test("contextualiza titulos genericos com sigla e semestre", () => {
     const prova = makeFile("/S05/SO - Sistemas Operacionais/2015.2 - Dijalma/Prova.pdf", "Prova.pdf", "pdf");
-    assert.equal(normalizeTitle(prova), "Sistemas Operacionais - Prova");
+    assert.equal(normalizeTitle(prova), "Sistemas Operacionais - Prova - 2015.2");
 
     const main = makeFile("/S04/CA - Calculo I/2018.1 - PH/main.c", "main.c", "c");
     assert.equal(normalizeTitle(main), "CA - Main - 2018.1");
@@ -481,7 +485,50 @@ test("contextualiza titulo generico com disciplina e tipo", () => {
 
 test("remove sufixos de copia e versao do titulo", () => {
     const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/Cópia de Prova_v2_editado.pdf", "Cópia de Prova_v2_editado.pdf", "pdf");
-    assert.equal(normalizeTitle(file), "Calculo I - Prova");
+    assert.equal(normalizeTitle(file), "Calculo I - Prova - 2024.1");
+});
+
+test("prioriza contexto da disciplina apos pasta Sxx", () => {
+    const file = makeFile("../provas//S01/CA - Calculo I/2010.2/Cadeiras com o Ronaldo/N1/Prova 1.jpg", "Prova 1.jpg", "jpg");
+    assert.equal(inferDisciplina(file), "Calculo I");
+    assert.equal(normalizeTitle(file), "Prova - Calculo I (Parte 01)");
+});
+
+test("normaliza aliases novos de professor", () => {
+    const tagsMacedo = inferTags(makeFile("/S01/CA - Calculo I/2024.1 - Macedo/AP1.pdf", "AP1.pdf", "pdf"));
+    const tagsSerra = inferTags(makeFile("/S04/BD - Banco de Dados/2024.1 - Serra/Projeto.pdf", "Projeto.pdf", "pdf"));
+    const tagsNarcelio = inferTags(makeFile("/S04/BD - Banco de Dados/2024.1 - Narcélio/Projeto.pdf", "Projeto.pdf", "pdf"));
+
+    assert.ok(tagsMacedo.includes("Fernando Macedo"));
+    assert.ok(tagsSerra.includes("Serra"));
+    assert.ok(tagsNarcelio.includes("Narcélio Pinto"));
+});
+
+test("herda tipo prova de pasta pai de avaliacao para imagem", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/N2/foto_prova.png", "foto_prova.png", "png");
+    assert.equal(inferTipo(file), "Prova");
+});
+
+test("trata readme de raiz e src como ruido", () => {
+    const rootReadme = makeFile("/README.md", "README.md", "md");
+    const srcReadme = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/src/README.md", "README.md", "md");
+    assert.equal(inferMetadata(rootReadme), null);
+    assert.equal(inferMetadata(srcReadme), null);
+});
+
+test("limpa codigos e redundancia em titulo de PUD", () => {
+    const file = makeFile("/Documentos/PUDS/S01/CA - Calculo I/1916473-O PUD Calculo I.pdf", "1916473-O PUD Calculo I.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Plano de Ensino - Calculo I");
+});
+
+test("preserva ano no inicio de nome de prova", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/2019-Prova.pdf", "2019-Prova.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "2019-Prova");
+});
+
+test("remove colchetes vazios apos limpeza", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/1 [ ] Respostas.pdf", "1 [ ] Respostas.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Respostas");
 });
 
 test("usa contexto em imagens genericas de prova", () => {

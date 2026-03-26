@@ -39,6 +39,8 @@ const NOISE_FILE_NAMES = new Set([
     ".editorconfig",
 ]);
 
+const CONTEXT_README_FOLDERS = new Set(["src"]);
+
 const NOISE_EXTENSIONS = new Set([
     "tmp",
     "temp",
@@ -120,7 +122,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     ED2: "Estrutura de Dados II",
     MD: "Matemática Discreta",
     ATC: "Aspectos Teóricos da Computação",
-    IAI: "Automação Industrial",
+    IAI: "Introdução à Automação Industrial",
     IAA: "Introdução à Análise de Algoritmos",
     IN: "Instrumentação",
     POO: "Programação Orientada a Objetos",
@@ -139,6 +141,9 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     IP: "Introdução à Programação",
     LI: "Libras",
     PE: "Probabilidade e Estatística",
+    PO: "Pesquisa e Ordenação",
+    PEO: "Pesquisa e Ordenação",
+    IC: "Inteligência Computacional",
     CN: "Cálculo Numérico",
     PP: "Paradigmas de Programação",
     PSI: "Projeto de Sistemas de Informação",
@@ -287,6 +292,7 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     BENTO: "José Bento de Freitas",
     AJALMAR: "Ajalmar Rêgo da Rocha Neto",
     ANAXAGORAS: "Anaxágoras Maia Girão",
+    "ANAXÁGORAS": "Anaxágoras Maia Girão",
     PARENTE: "Fernando Parente Garcia",
     GLAUBER: "Glauber Ferreira Cintra",
     CIDCLEY: "Cidcley Teixeira de Souza",
@@ -301,6 +307,7 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     "PAULO REGIS": "Paulo Régis Carneiro de Araújo",
     RONALDO: "Ronaldo Fernandes Ramos",
     "FERNANDO MACEDO": "Fernando Macedo",
+    MACEDO: "Fernando Macedo",
     "ROBERTO CARLOS": "Roberto Carlos",
     "MARIA EUGENIA": "Maria Eugênia",
     MURILO: "Murilo",
@@ -309,6 +316,8 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     "LUCAS SOUSA": "Lucas Sousa",
     "LUCAS MOURA": "Lucas Moura",
     NARCELIO: "Narcélio Pinto",
+    "NARCÉLIO": "Narcélio Pinto",
+    SERRA: "Serra",
     "ALUISIO CABRAL": "Aluísio Cabral",
     "JOSE CARNEIRO": "José Carneiro",
     "JOSÉ CARNEIRO": "José Carneiro",
@@ -349,6 +358,22 @@ const GENERIC_TITLE_TOKENS = new Set([
     "documento",
     "material",
     "resumo",
+    "n1",
+    "n2",
+    "n3",
+    "n4",
+    "av1",
+    "av2",
+    "av3",
+    "av4",
+    "ap1",
+    "ap2",
+    "ap3",
+    "ap4",
+    "p1",
+    "p2",
+    "p3",
+    "p4",
 ]);
 
 const PROFESSOR_CANONICAL_MAP = new Map(
@@ -690,6 +715,28 @@ function getSubjectPart(path: unknown): string {
     const parts = normalizedPath.split("/").filter(Boolean);
 
     const siglaNamePattern = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/;
+
+    for (let i = 0; i < parts.length - 2; i += 1) {
+        const part = fixMojibake(parts[i]).trim();
+        if (!/^s\d{1,2}$/i.test(part)) {
+            continue;
+        }
+
+        const candidate = fixMojibake(parts[i + 1]).trim();
+        if (!candidate) {
+            continue;
+        }
+
+        if (siglaNamePattern.test(candidate)) {
+            return candidate;
+        }
+
+        const candidateSigla = normalizeSigla(candidate);
+        if (resolveDisciplinaBySigla(candidateSigla, normalizedPath)) {
+            return candidate;
+        }
+    }
+
     let fallback = "";
 
     for (let i = parts.length - 2; i >= 0; i -= 1) {
@@ -942,6 +989,16 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
     const normalizedName = normalizeComparable(file?.name);
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
 
+    const isReadme = normalizedName === "readme.md";
+    if (isReadme) {
+        const folderParts = normalizedPathParts.slice(0, Math.max(0, normalizedPathParts.length - 1));
+        const atRepoRoot = folderParts.length <= 1;
+        const underContextFolder = folderParts.some((part) => CONTEXT_README_FOLDERS.has(part));
+        if (atRepoRoot || underContextFolder) {
+            return true;
+        }
+    }
+
     if (NOISE_PATH_MARKERS.some((marker) => normalizedPath.includes(marker))) {
         return true;
     }
@@ -1051,9 +1108,13 @@ export function inferMetadata(
     }
 
     const extension = normalizeComparable(normalizedFile.extension).replace(/^\./, "");
+    const tipo = inferTipo(normalizedFile);
     const shouldFilterCodeFiles = options?.filterCodeFiles ?? true;
     if (shouldFilterCodeFiles && COMPILED_ARTIFACT_EXTENSIONS.has(extension)) {
-        return null;
+        const shouldKeepCompiledByContext = HARDWARE_EXTENSIONS.has(extension) && ["Prova", "Trabalho/Projeto"].includes(tipo);
+        if (!shouldKeepCompiledByContext) {
+            return null;
+        }
     }
 
     if (shouldFilterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile)) {
@@ -1064,7 +1125,7 @@ export function inferMetadata(
 
     return {
         title: normalizeTitle(normalizedFile),
-        tipo: inferTipo(normalizedFile),
+        tipo,
         disciplina: inferDisciplina(normalizedFile),
         semester: inferSemester(normalizedFile),
         tags: inferTags(normalizedFile),
@@ -1084,8 +1145,12 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     if (/\bpud\b/i.test(nameWithoutExt) || tipo === "Plano de Ensino") {
         const pudSubject = normalizeText(nameWithoutExt)
+            .replace(/^\d{5,}\s*[-–—]?\s*/i, "")
             .replace(/^\s*(?:pud|plano\s+de\s+ensino)\b\s*[-–—:]?\s*/i, "")
+            .replace(/\b(?:o\s+)?pud\b/gi, "")
+            .replace(/\bplano\s+de\s+ensino\b/gi, "")
             .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
+            .replace(/\s{2,}/g, " ")
             .trim();
         const target = pudSubject || subject;
         return target ? `Plano de Ensino - ${target}` : "Plano de Ensino";
@@ -1097,8 +1162,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/^(?:\d+\s*[-–—]\s*)/, "")
         .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
         .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
-        .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
+        .replace(/^(?!(?:19|20)\d{2}(?:\b|[.\-_]))(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*|\d+\s+)/, "")
         .replace(/[._\-]/g, " ")
+        .replace(/\[\s*\]/g, " ")
         .replace(/(?:^|\s)(?:c[^\s]*pia\s+de|c[^\s]*pia)\s*(?:\(?\s*\d+\s*\)?)?/gi, " ")
         .replace(/\b(?:vers[aã]o\s*)?v\d+(?:\.\d+)?\b/gi, " ")
         .replace(/\bfinal\b/gi, " ")
@@ -1275,6 +1341,13 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         if (part) {
             return `${base} (Parte ${part})`;
         }
+        if (base === "Prova") {
+            const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
+            const contextualParts = [displaySubject, "Prova", semester].filter(Boolean);
+            if (contextualParts.length > 1) {
+                return contextualParts.join(" - ");
+            }
+        }
         return base;
     }
 
@@ -1286,6 +1359,18 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     const normalizedCleanedName = normalizeComparable(cleanedName);
+    const isGenericAssessmentName = /^(?:prova(?:\s+\d+)?|n\s*[1-4]|(?:av|ap|p)\s*[1-4])$/i.test(normalizedCleanedName);
+    const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
+
+    if (
+        displaySubject &&
+        (isGenericAssessmentName ||
+            (normalizedCleanedName !== "main" && isGenericTitleLike(normalizedCleanedName) && originalName.length < 10))
+    ) {
+        const contextualTitle = cleanedName || inferGenericTitleTypeLabel(tipo);
+        return [displaySubject, contextualTitle, semester].filter(Boolean).join(" - ");
+    }
+
     if (normalizedCleanedName && subject && normalizedCleanedName === normalizeComparable(subject)) {
         return subject;
     }
@@ -1303,7 +1388,6 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             }
         }
 
-        const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
         const contextualLabel = inferGenericTitleTypeLabel(tipo);
         if (displaySubject) {
             return `${displaySubject} - ${contextualLabel}`;
@@ -1346,6 +1430,8 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isRootProvasFolder = /^provas?(?:\b|\s|$)/i.test(normalizeComparable(pathParts[0] ?? ""));
     const isProvasFolder = nestedParts.some((part) => /^provas?(?:\b|\s|$)/i.test(normalizeComparable(part)));
     const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(contextualPath);
+    const parentFolder = normalizeComparable(pathParts[pathParts.length - 2] ?? "");
+    const isAssessmentParentFolder = /^(?:provas?|n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|p[1-4]|af)$/.test(parentFolder);
     const isHardwareFile = HARDWARE_EXTENSIONS.has(extension);
     const hasSemesterFolder = /(^|\/)s\d{1,2}(\/|$)/i.test(path);
     const hasAcademicSemester = /(?:19|20)\d{2}[._\-\s]?[12]/.test(path);
@@ -1375,6 +1461,10 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     }
 
     if (isRootProvasFolder && IMAGE_EXTENSIONS.has(extension) && hasSemesterFolder && hasAcademicSemester) {
+        return "Prova";
+    }
+
+    if (IMAGE_EXTENSIONS.has(extension) && isAssessmentParentFolder) {
         return "Prova";
     }
 
@@ -1413,6 +1503,15 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     }
 
     return "Material Complementar";
+}
+
+function isGenericTitleLike(normalizedTitle: string): boolean {
+    return (
+        GENERIC_TITLE_TOKENS.has(normalizedTitle) ||
+        /^\d+$/.test(normalizedTitle) ||
+        /^(?:n|av|ap|p)\s*[1-4]$/.test(normalizedTitle) ||
+        /^prova(?:\s+\d+)?$/.test(normalizedTitle)
+    );
 }
 
 export function inferDisciplina(file: RepoFile | null | undefined): string {
