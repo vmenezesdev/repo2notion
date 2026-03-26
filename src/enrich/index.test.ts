@@ -49,7 +49,7 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "PUD Calculo I.doc",
         "doc",
     );
-    assert.equal(normalizeTitle(pudFile), "Plano de Ensino - Cálculo");
+    assert.equal(normalizeTitle(pudFile), "Plano de Ensino - Calculo I");
 
     const provaImagem = makeFile(
         "/S01/CA - Calculo/2018.1 - PH/N2/N2 prova 1.jpeg",
@@ -76,7 +76,12 @@ test("captura professor com sigla curta", () => {
 
 test("captura professor quando pasta vem apos ano semestre", () => {
     const tags = inferTags(makeFile("/S01/CA - Calculo/2014.2/Joao/AP1.pdf", "AP1.pdf", "pdf"));
-    assert.ok(tags.includes("Joao"));
+    assert.ok(tags.includes("JOAO"));
+});
+
+test("captura professor composto em pasta ano-semestre", () => {
+    const tags = inferTags(makeFile("/S02/ED - Eletronica Digital/2015.2 - Joao Gabriel/N1.pdf", "N1.pdf", "pdf"));
+    assert.ok(tags.includes("JOAO GABRIEL"));
 });
 
 test("prioriza tipo prova sobre documentacao", () => {
@@ -121,6 +126,11 @@ test("adiciona tag projeto para arquivos de proteus", () => {
     const tags = inferTags(file);
     assert.ok(tags.includes("Projeto"));
     assert.ok(tags.includes("Hardware"));
+});
+
+test("prioriza tipo prova para proteus em contexto de avaliacao", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/N1/MI.dsn", "MI.dsn", "dsn");
+    assert.equal(inferTipo(file), "Prova");
 });
 
 test("aceita disciplina em pasta especial sem sigla", () => {

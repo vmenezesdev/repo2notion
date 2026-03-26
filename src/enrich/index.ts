@@ -474,8 +474,13 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
     const isImage = IMAGE_EXTENSIONS.has(extension);
 
-    if (/^\s*pud\b/i.test(nameWithoutExt) || tipo === "Plano de Ensino") {
-        return subject ? `Plano de Ensino - ${subject}` : "Plano de Ensino";
+    if (/\bpud\b/i.test(nameWithoutExt) || tipo === "Plano de Ensino") {
+        const pudSubject = normalizeText(nameWithoutExt)
+            .replace(/^\s*(?:pud|plano\s+de\s+ensino)\b\s*[-–—:]?\s*/i, "")
+            .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
+            .trim();
+        const target = pudSubject || subject;
+        return target ? `Plano de Ensino - ${target}` : "Plano de Ensino";
     }
 
     let cleanedName = normalizeText(nameWithoutExt)
@@ -545,6 +550,9 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const name = normalizeComparable(file?.name);
     const path = normalizeComparable(normalizePath(file?.path));
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const nameWithoutExt = fixMojibake(safeString(file?.name).replace(/\.[^/.]+$/, ""));
+    const compactName = normalizeSigla(nameWithoutExt);
+    const subjectSigla = getSubjectSigla(file);
 
     const isAula = TIPO_PATTERNS.aula.some((pattern) => pattern.test(name) || pattern.test(path));
     const isLista = TIPO_PATTERNS.lista.some((pattern) => pattern.test(name) || pattern.test(path));
@@ -557,6 +565,16 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path);
     const isProvasFolder = /(^|\/)provas?(\/|$)/i.test(path);
     const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(path);
+    const hasSemesterFolder = /(^|\/)s\d{1,2}(\/|$)/i.test(path);
+    const hasAcademicSemester = /(?:19|20)\d{2}[._\-\s]?[12]/.test(path);
+    const isOnlySubjectSigla = Boolean(subjectSigla) && compactName === subjectSigla;
+
+    if (
+        ["dsn", "pdsprj"].includes(extension) &&
+        (isProvasFolder || isAssessmentFolder || (hasSemesterFolder && hasAcademicSemester && isOnlySubjectSigla))
+    ) {
+        return "Prova";
+    }
 
     if (isProva || isProvasFolder || isAssessmentFolder) {
         return "Prova";
@@ -597,20 +615,38 @@ export function inferTipo(file: RepoFile | null | undefined): string {
 }
 
 export function inferDisciplina(file: RepoFile | null | undefined): string {
-    const subjectPart = getSubjectPart(normalizePath(file?.path));
-    const { sigla, name } = getSiglaAndName(subjectPart);
+    const path = normalizePath(file?.path);
+    const parts = path.split("/").filter(Boolean);
 
-    if (DISCIPLINA_BY_SIGLA[sigla]) {
-        return DISCIPLINA_BY_SIGLA[sigla];
+    for (let i = parts.length - 2; i >= 0; i -= 1) {
+        const part = fixMojibake(parts[i]).trim();
+        if (!part) {
+            continue;
+        }
+
+        const comparable = normalizeComparable(part);
+        const { sigla, name } = getSiglaAndName(part);
+        if (sigla && DISCIPLINA_BY_SIGLA[sigla]) {
+            return DISCIPLINA_BY_SIGLA[sigla];
+        }
+
+        const isIgnored =
+            IGNORED_SUBJECT_FOLDERS.has(comparable) ||
+            /^documentos(?:\b|\s*[-_])/i.test(comparable) ||
+            /^[sn]\d{1,2}$/i.test(comparable) ||
+            /^\d{4}/.test(comparable);
+        if (isIgnored) {
+            continue;
+        }
+
+        if (name) {
+            return fixMojibake(name).trim();
+        }
+
+        return part;
     }
 
-    if (name) {
-        return fixMojibake(name);
-    }
-
-    return fixMojibake(subjectPart || "Geral")
-        .replace(/^\s*s\d{1,2}\s*[-_]?\s*/i, "")
-        .trim();
+    return "Geral";
 }
 
 export function inferSemester(file: RepoFile | null | undefined): string {
@@ -669,33 +705,39 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     }
 
     let profName = "";
+    const pathParts = normalizePath(normalizedPath).split("/").filter(Boolean);
 
-    const professorMatch = fixMojibake(normalizedPath).match(/(?:^|\/)(?:19|20)\d{2}[._\-\s]?[12]\s*-\s*([^/]+?)(?=\/|$)/i);
-    if (professorMatch) {
-        profName = professorMatch[1].trim();
-    } else {
-        const pathParts = normalizePath(normalizedPath).split("/").filter(Boolean);
-        for (let i = 0; i < pathParts.length - 1; i += 1) {
-            const part = fixMojibake(pathParts[i]).trim();
-            const normalizedPart = normalizeComparable(part);
-            if (/^\d{4}[._\-\s]?[12]$/.test(normalizedPart) && i + 1 < pathParts.length - 1) {
-                const candidate = fixMojibake(pathParts[i + 1]).trim();
-                if (
-                    candidate.length >= 2 &&
-                    /[A-Za-z]/.test(candidate) &&
-                    !/^s\d{2}$/i.test(candidate) &&
-                    !/^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(candidate)
-                ) {
-                    profName = candidate;
-                    break;
-                }
+    for (let i = 0; i < pathParts.length - 1; i += 1) {
+        const part = fixMojibake(pathParts[i]).trim();
+        const normalizedPart = normalizeComparable(part);
+
+        const yearDashProfessor = part.match(/^(?:19|20)\d{2}[._\-\s]?[12]\s*-\s*(.+)$/i);
+        if (yearDashProfessor?.[1]) {
+            const candidate = yearDashProfessor[1].trim();
+            if (candidate.length >= 2 && /[A-Za-z]/.test(candidate)) {
+                profName = candidate;
+                break;
+            }
+        }
+
+        if (/^(?:19|20)\d{2}[._\-\s]?[12]$/.test(normalizedPart) && i + 1 < pathParts.length - 1) {
+            const candidate = fixMojibake(pathParts[i + 1]).trim();
+            if (
+                candidate.length >= 2 &&
+                /[A-Za-z]/.test(candidate) &&
+                !/^s\d{2}$/i.test(candidate) &&
+                !/^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(candidate)
+            ) {
+                profName = candidate;
+                break;
             }
         }
     }
 
     if (profName) {
-        if (profName.length >= 2 && /[A-Za-z]/.test(profName)) {
-            tags.add(profName);
+        const normalizedProfessorTag = normalizeText(profName).toUpperCase();
+        if (normalizedProfessorTag.length >= 2 && /[A-Z]/.test(normalizedProfessorTag)) {
+            tags.add(normalizedProfessorTag);
         }
     }
 
