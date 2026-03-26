@@ -114,7 +114,7 @@ function normalizePath(path: string): string {
 }
 
 function stripDiacritics(value: string): string {
-    return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return value?.normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
 }
 
 function fixMojibake(value: string): string {
