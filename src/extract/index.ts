@@ -21,5 +21,9 @@ export function removeLfsPaths(files: RepoFile[]): RepoFile[] {
 
 export function removeGitPaths(files: RepoFile[]): RepoFile[] {
     // .git/
-    return files.filter((file) => !file.path.includes(".git/"));
+    return files
+    .filter((file) => !file.path.includes(".git/"))
+    .filter((file) => !file.path.includes(".github/"))
+    .filter((file) => !file.path.includes(".gitattributes"))
+    .filter((file) => !file.path.includes(".gitignore"));
 }
