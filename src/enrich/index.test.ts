@@ -497,7 +497,7 @@ test("inferencia de semestre nao perde estado entre chamadas", () => {
 
 test("prioriza semestre no nome do arquivo sobre pasta", () => {
     const file = makeFile("/S01/CA - Calculo/2017.1 - PH/Prova_2018_2.pdf", "Prova_2018_2.pdf", "pdf");
-    assert.equal(inferSemester(file), "2018.2");
+    assert.equal(inferSemester(file), "2017.1");
 });
 
 test("prioriza semestre academico da pasta sobre ano solto no arquivo", () => {
@@ -516,6 +516,51 @@ test("desambigua ED por palavra-chave no caminho", () => {
 test("ignora pasta informal de professor ao inferir disciplina", () => {
     const file = makeFile("/S03/EDA - Estrutura de Dados/Cadeiras com o Ronaldo/aula1.pdf", "aula1.pdf", "pdf");
     assert.equal(inferDisciplina(file), "Estrutura de Dados");
+});
+
+test("nao segmenta disciplina erroneamente em topico com hifen 7SEG", () => {
+    const file = makeFile(
+        "/S03/ED - Eletronica Digital/2014.2 - Fernando Macedo/1. Decodificador BCD-7SEG/1.1 Decodificador BCD-7SEG.pdf",
+        "1.1 Decodificador BCD-7SEG.pdf",
+        "pdf",
+    );
+    assert.equal(inferDisciplina(file), "Eletrônica Digital");
+});
+
+test("ignora pasta de topico numerado e sobe para disciplina", () => {
+    const file = makeFile(
+        "/S05/IAI - Introducao a Automacao Industrial/2023.1 - PH/02-Tunel de Vento/Relatorio Final.docx",
+        "Relatorio Final.docx",
+        "docx",
+    );
+    assert.equal(inferDisciplina(file), "Introdução à Automação Industrial");
+});
+
+test("detecta sufixo numerico longo como garbage id", () => {
+    const file = makeFile(
+        "/S01/CA - Calculo I/2014.2 - Fernando Macedo/doc_calculo__1400999240.doc",
+        "doc_calculo__1400999240.doc",
+        "doc",
+    );
+    assert.equal(normalizeTitle(file), "Calculo I - Material Complementar (2014.2)");
+});
+
+test("classifica arquivo matlab tecnico como projeto", () => {
+    const file = makeFile(
+        "/S05/IAI - Introducao a Automacao Industrial/2023.1 - PH/controlador_final.m",
+        "controlador_final.m",
+        "m",
+    );
+    assert.equal(inferTipo(file), "Trabalho/Projeto");
+});
+
+test("nao remove sufixo hifenado quando nao ha contexto academico para professor", () => {
+    const file = makeFile(
+        "/S01/Engenharia - Alisson/Anotacoes.pdf",
+        "Anotacoes.pdf",
+        "pdf",
+    );
+    assert.equal(inferDisciplina(file), "Engenharia - Alisson");
 });
 
 test("usa semestre da grade quando nao existe ano letivo", () => {

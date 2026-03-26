@@ -238,6 +238,8 @@ const TOPIC_SUBJECT_FOLDERS = new Set([
     "arduino",
 ]);
 
+const NUMBERED_TOPIC_FOLDER_PATTERN = /^\d+(?:\s*[.)]|[\s._\-–—]+)\s*\S+/i;
+
 const GENERIC_CONTEXT_FOLDERS = new Set([
     "src",
     "source",
@@ -937,6 +939,16 @@ function stripProfessorSuffixFromFolderPart(part: string): string {
         return normalizedPart;
     }
 
+    const base = splitParts.slice(0, -1).join(" - ").trim();
+    const baseComparable = normalizeComparable(base);
+    const baseLooksAcademicContext =
+        /^(?:19|20)\d{2}[._\-\s]?[12](?:\b|\s*[-–—])/.test(baseComparable) ||
+        /^s\d{1,2}(?:\b|\s*[-–—])/.test(baseComparable) ||
+        /^\s*[A-Za-z]{2,10}\s*[-–—_]\s*.+$/.test(base);
+    if (!baseLooksAcademicContext && splitParts.length <= 2) {
+        return normalizedPart;
+    }
+
     const withoutSuffix = splitParts.slice(0, -1).join(" - ").trim();
     if (!withoutSuffix) {
         return "";
@@ -949,6 +961,20 @@ function stripProfessorSuffixFromFolderPart(part: string): string {
     return withoutSuffix;
 }
 
+function isNumberedTopicFolder(part: string): boolean {
+    const normalizedPart = normalizeText(part);
+    if (!normalizedPart) {
+        return false;
+    }
+
+    const comparable = normalizeComparable(normalizedPart);
+    if (/^(?:19|20)\d{2}[._\-\s]?[12](?:\b|\s*[-–—])/.test(comparable)) {
+        return false;
+    }
+
+    return NUMBERED_TOPIC_FOLDER_PATTERN.test(normalizedPart);
+}
+
 function inferDisciplinaFromRepositoryRoot(path: unknown): string {
     const parts = normalizePath(path)
         .split("/")
@@ -956,6 +982,16 @@ function inferDisciplinaFromRepositoryRoot(path: unknown): string {
         .filter((part) => part !== "." && part !== "..");
     const repositoryRoot = parts[0] ?? "";
     if (!repositoryRoot) {
+        return "";
+    }
+
+    const normalizedRoot = normalizeComparable(repositoryRoot);
+    if (
+        IGNORED_SUBJECT_FOLDERS.has(normalizedRoot) ||
+        TOPIC_SUBJECT_FOLDERS.has(normalizedRoot) ||
+        isNumberedTopicFolder(repositoryRoot) ||
+        isLikelyProfessorFolder(repositoryRoot)
+    ) {
         return "";
     }
 
@@ -1011,6 +1047,14 @@ function isGarbageIdLikeName(nameWithoutExt: string): boolean {
     const compact = normalized.replace(/\s+/g, "");
     if (/^\d{10,}[a-z]?$/i.test(compact)) {
         return true;
+    }
+
+    const idSuffixMatch = normalized.match(/[\s_.\-]{1,3}(\d{8,})$/);
+    if (idSuffixMatch) {
+        const prefix = normalized.slice(0, idSuffixMatch.index).trim();
+        if (/[A-Za-zÀ-ÿ]{3,}/.test(prefix)) {
+            return true;
+        }
     }
 
     const tokens = normalized.split(/\s+/).filter(Boolean);
@@ -1069,6 +1113,7 @@ function getSubjectPart(path: unknown): string {
             TOPIC_SUBJECT_FOLDERS.has(comparable) ||
             isTopicLikeFolder ||
             isGenericContextFolder ||
+            isNumberedTopicFolder(part) ||
             /^s\d{1,2}$/i.test(part) ||
             /^n\d{1,2}$/i.test(part) ||
             /^\d+$/.test(comparable) ||
@@ -1106,17 +1151,26 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     const normalizedSubject = fixMojibake(subjectPart).trim();
-    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,6})\s*([-–—_])?\s*(.+)$/);
+    if (/^[sn]\d{1,2}$/i.test(normalizedSubject)) {
+        return { sigla: "", name: "" };
+    }
+    if (normalizedSubject.length <= 2) {
+        const shortSigla = normalizeSigla(normalizedSubject);
+        if (DISCIPLINA_BY_SIGLA[shortSigla] || DISCIPLINA_BY_SIGLA_AND_SEMESTER[shortSigla] || isLikelySigla(shortSigla)) {
+            return { sigla: shortSigla, name: "" };
+        }
+        return { sigla: "", name: "" };
+    }
+
+    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*([-–—_])\s*(.+)$/);
     if (compactSiglaMatch) {
         const sigla = normalizeSigla(compactSiglaMatch[1]);
-        const hasSeparator = Boolean(compactSiglaMatch[2]);
-        if (!hasSeparator && !DISCIPLINA_BY_SIGLA[sigla]) {
-            return { sigla: "", name: "" };
+        if (DISCIPLINA_BY_SIGLA[sigla] || DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla] || isLikelySigla(sigla)) {
+            return {
+                sigla,
+                name: compactSiglaMatch[3].trim(),
+            };
         }
-        return {
-            sigla,
-            name: compactSiglaMatch[3].trim(),
-        };
     }
 
     const spacedSiglaMatch = normalizedSubject.match(/^\s*([A-Z]{2,10})\s+(.+)$/);
@@ -1131,26 +1185,28 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
         }
     }
 
-    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s*[-–—_]\s*/);
-    let sigla = normalizeSigla(siglaRaw ?? "");
-    let name = nameParts.join(" - ").trim();
+    const splitParts = normalizedSubject.split(/\s*[-–—_]\s*/).filter(Boolean);
+    const siglaRaw = splitParts[0] ?? "";
+    const name = splitParts.slice(1).join(" - ").trim();
+    const sigla = normalizeSigla(siglaRaw);
 
-    // BUG FIX #2: Validate if siglaRaw starts with numbers (e.g., "1. Decodificador BCD")
-    // If sigla contains or starts with digits, it's likely not a valid course abbreviation
-    if (/^\d/.test(siglaRaw ?? "") || !isLikelySigla(sigla)) {
-        // Try to check if the name part is actually a valid discipline
-        const potentialName = normalizedSubject.trim();
-        if (potentialName && nameParts.length === 0) {
-            return { sigla: "", name: potentialName };
+    if (splitParts.length >= 2) {
+        const firstLooksNumberedTopic = isNumberedTopicFolder(siglaRaw);
+        if (!firstLooksNumberedTopic && isLikelySigla(sigla)) {
+            if (!name && normalizedSubject && DISCIPLINA_BY_SIGLA[sigla]) {
+                return { sigla, name: DISCIPLINA_BY_SIGLA[sigla] };
+            }
+            return { sigla, name };
         }
-        sigla = "";
+
+        return { sigla: "", name: normalizedSubject };
     }
 
     if (!name && normalizedSubject && DISCIPLINA_BY_SIGLA[sigla]) {
         return { sigla, name: DISCIPLINA_BY_SIGLA[sigla] };
     }
 
-    return { sigla, name };
+    return { sigla: "", name: "" };
 }
 
 function levenshteinDistance(a: string, b: string): number {
@@ -2212,6 +2268,11 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     }
 
     if (extension === "m" && !hasProjetoHint) {
+        const hasMatlabProjectHint = /\b(?:final|trabalho|projet(?:o|os)|ep\s*\d+)\b/i.test(name) ||
+            /\b(?:final|trabalho|projet(?:o|os)|ep\s*\d+)\b/i.test(contextualPath);
+        if (isTechnicalContext(file) && hasMatlabProjectHint) {
+            return "Trabalho/Projeto";
+        }
         return "Script/Simulação";
     }
 
@@ -2411,6 +2472,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
             TOPIC_SUBJECT_FOLDERS.has(comparable) ||
             isTopicLikeFolder ||
             isGenericContextFolder ||
+            isNumberedTopicFolder(part) ||
             /^documentos(?:\b|\s*[-_])/i.test(comparable) ||
             /^[sn]\d{1,2}$/i.test(comparable) ||
             /^\d{4}/.test(comparable) ||
@@ -2421,6 +2483,12 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
 
         if (name) {
             return withDisciplineSpecialization(fixMojibake(name).trim(), file);
+        }
+
+        const hasMeaningfulLetters = /[A-Za-zÀ-ÿ]{3,}/.test(part);
+        const isWeakSingleToken = /^[A-Za-z]\d{1,3}$/i.test(part) || /^[A-Za-z]$/i.test(part);
+        if (!hasMeaningfulLetters || isWeakSingleToken) {
+            continue;
         }
 
         return withDisciplineSpecialization(part, file);
@@ -2529,24 +2597,24 @@ export function inferSemester(file: RepoFile | null | undefined): string {
     const name = safeString(file?.name);
     const path = normalizePath(file?.path);
 
-    const semesterFromName = getAcademicSemesterFromText(name);
-    if (semesterFromName) {
-        return semesterFromName;
-    }
-
     const semesterFromPath = getAcademicSemesterFromText(path);
     if (semesterFromPath) {
         return semesterFromPath;
     }
 
-    const yearFromName = getYearFromText(name);
-    if (yearFromName) {
-        return yearFromName;
+    const semesterFromName = getAcademicSemesterFromText(name);
+    if (semesterFromName) {
+        return semesterFromName;
     }
 
     const yearFromPath = getYearFromText(path);
     if (yearFromPath) {
         return yearFromPath;
+    }
+
+    const yearFromName = getYearFromText(name);
+    if (yearFromName) {
+        return yearFromName;
     }
 
     return getGradeSemesterFromPath(path);
