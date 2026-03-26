@@ -578,7 +578,7 @@ test("mantem codigo quando nome indica projeto em contexto novo", () => {
 
 test("remove tags redundantes quando sigla ja representa disciplina", () => {
     const tags = inferTags(makeFile("/BEPID-Apple/2014/Projeto 1.docx", "Projeto 1.docx", "docx"));
-    assert.ok(tags.includes("BEPID"));
+    assert.ok(!tags.includes("BEPID"));
     assert.ok(tags.includes("BEPID Apple"));
 });
 
@@ -693,9 +693,9 @@ test("mantem prova para hardware em pasta provas explicita", () => {
     assert.equal(inferTipo(file), "Prova");
 });
 
-test("inclui sigla resolvida em tags mesmo sem sigla no caminho", () => {
+test("deduplica sigla resolvida quando disciplina completa existe", () => {
     const tags = inferTags(makeFile("/S04/Processamento Digital de Sinais/2020.2 - Ricardo Rodriges/AP1.png", "AP1.png", "png"));
-    assert.ok(tags.includes("PDS"));
+    assert.ok(!tags.includes("PDS"));
     assert.ok(tags.includes("Processamento Digital de Sinais"));
 });
 
@@ -715,6 +715,16 @@ test("classifica python tecnico como script simulacao quando nao e projeto", () 
         "py",
     );
     assert.equal(inferTipo(file), "Script/Simulação");
+});
+
+test("classifica python de IP como trabalho projeto", () => {
+    const file = makeFile(
+        "/S01/IP - Introducao a Programacao/2024.1 - PH/atividade_01.py",
+        "atividade_01.py",
+        "py",
+    );
+    assert.equal(inferTipo(file), "Trabalho/Projeto");
+    assert.notEqual(inferTipo(file), "Script/Simulação");
 });
 
 test("classifica imagem em pasta de aula como material de aula", () => {
