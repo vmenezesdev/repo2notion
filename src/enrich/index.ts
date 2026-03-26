@@ -106,6 +106,7 @@ const TIPO_PATTERNS = {
 const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monitoria)(\/|\b)/i;
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
+const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
 
 const TAG_BY_EXTENSION: Record<string, string> = {
     c: "C",
@@ -316,6 +317,11 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
     return normalizedName.startsWith("~$") || normalizedName.startsWith(".") || normalizedName.endsWith(".tmp");
 }
 
+function isCodeFile(file: RepoFile | null | undefined): boolean {
+    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    return CODE_EXTENSIONS.has(extension);
+}
+
 function getAssessmentLabel(nameWithoutExt: string): string {
     const text = normalizeComparable(nameWithoutExt);
 
@@ -366,12 +372,19 @@ function getAssessmentLabel(nameWithoutExt: string): string {
  * }
  * ```
  */
-export function inferMetadata(file: RepoFile | null | undefined): RecordCandidate | null {
+export function inferMetadata(
+    file: RepoFile | null | undefined,
+    options: { filterCodeFiles: boolean } = { filterCodeFiles: true }
+): RecordCandidate | null {
     if (!file) {
         return null;
     }
 
     if (isNoiseFile(file)) {
+        return null;
+    }
+
+    if (options.filterCodeFiles && isCodeFile(file)) {
         return null;
     }
 
