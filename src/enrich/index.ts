@@ -60,6 +60,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     EDA: "Estrutura de Dados",
     ED1: "Estrutura de Dados",
     ED2: "Estrutura de Dados II",
+    MD: "Matemática Discreta",
     ATC: "Aspectos Teóricos da Computação",
     IAI: "Automação Industrial",
     POO: "Programação Orientada a Objetos",
@@ -84,12 +85,15 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     SL: "Sistemas Lineares",
     STR: "Sistemas de Tempo Real",
     PPD: "Programação Paralela e Distribuída",
+    PDS: "Processamento Digital de Sinais",
     EG: "Empreendedorismo e Gestão",
     VC: "Visão Computacional",
     SE: "Sistemas Embarcados",
     EDO: "Equações Diferenciais",
     EA: "Eletrônica Analógica",
+    EI: "Eletrônica Industrial",
     MI: "Microcontroladores e Microprocessadores",
+    MCT: "Metodologia Científica",
     GP: "Gerenciamento de Projetos",
     SM: "Sistemas Multimídia",
     PT: "Produção Textual",
@@ -114,10 +118,12 @@ const TIPO_PATTERNS = {
     prova: [
         /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|n[1-4](?:[._-]\d+)?|af|prova|avaliac[aã]o|simulado)(\b|$)/i,
         /(^|\b)(?:av|ap|p)\s*parcial\s*\d(\b|$)/i,
+        /(^|\b)(exam|midterm|final\s*exam|test|quiz)(\b|$)/i,
         /(\/|\b)(provas?|avaliac(?:oes|o(?:es)?)|simulados?)(\/|\b)/i,
     ],
     lista: [
         /(^|\b)(lista|exerc[ií]c(?:io|ios)?|folha\s*de\s*exerc[ií]cios?|td)(\b|$)/i,
+        /(^|\b)(assignment|homework|problem\s*set)(\b|$)/i,
         /(\/|\b)(listas?|exercicios?|tutoriais?)(\/|\b)/i,
     ],
     aula: [
@@ -135,13 +141,20 @@ const TIPO_PATTERNS = {
         /(^|\b)(manual|guia|roteiro|aviso|ementa|cronograma|instru[cç][aã]o|documenta[cç][aã]o)(\b|$)/i,
         /(\/|\b)(documentos?|docs?|guias?|avisos?)(\/|\b)/i,
     ],
+    administrativo: [
+        /(^|\b)(est[aá]gio|estagio|termo\s*de\s*compromisso|ifce|coordena[cç][aã]o|declara[cç][aã]o|requerimento)(\b|$)/i,
+        /(\/|\b)(est[aá]gio|estagio|administrativo|secretaria)(\/|\b)/i,
+    ],
+    gabaritoResolucao: [
+        /(^|\b)(gabarito|resolu[cç][aã]o|solu[cç][aã]o|answer\s*key|solution)(\b|$)/i,
+    ],
 };
 
 const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monitoria)(\/|\b)/i;
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
-const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof"]);
+const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "pdsit", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof"]);
 const TECHNICAL_SIGLAS = new Set([
     "ED",
     "EA",
@@ -179,6 +192,7 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     dsn: "Proteus",
     pdsprj: "Proteus",
     pdsbak: "Proteus",
+    pdsit: "Proteus",
     bdf: "Quartus",
     bsf: "Quartus",
     vpr: "Quartus",
@@ -299,6 +313,18 @@ function normalizeComparable(value: unknown): string {
 
 function normalizeSigla(value: unknown): string {
     return normalizeComparable(value).replace(/[^a-z0-9]/g, "").toUpperCase();
+}
+
+function isLikelySigla(sigla: string): boolean {
+    if (!sigla) {
+        return false;
+    }
+
+    if (DISCIPLINA_BY_SIGLA[sigla]) {
+        return true;
+    }
+
+    return sigla.length <= 6 && /^[A-Z0-9]+$/.test(sigla);
 }
 
 function getSemesterFromText(value: unknown): string {
@@ -538,6 +564,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     let cleanedName = normalizeText(nameWithoutExt)
         .replace(/^\d{5,}[-_\s]*/, "")
+        .replace(/^\d{5,}(?=[A-Za-z])/, "")
         .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
         .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
         .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
@@ -547,7 +574,14 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .trim();
 
     if (tipo === "Prova") {
+        const numberedProvaMatch = cleanedName.match(/^\s*prova\s*[-_ ]?(\d+)\s*$/i);
+        if (numberedProvaMatch?.[1]) {
+            cleanedName = `Prova ${numberedProvaMatch[1]}`;
+        }
         cleanedName = cleanedName.replace(/^\s*(?:prova|avaliac(?:ao|ão)|simulado)\b[:\-\s]*/i, "").trim();
+        if (/^\d+$/.test(cleanedName)) {
+            cleanedName = `Prova ${cleanedName}`;
+        }
     }
 
     if (tipo === "Lista de Exercícios") {
@@ -640,29 +674,39 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
 export function inferTipo(file: RepoFile | null | undefined): string {
     const name = normalizeComparable(file?.name);
-    const path = normalizeComparable(normalizePath(file?.path));
+    const normalizedPath = normalizePath(file?.path);
+    const path = normalizeComparable(normalizedPath);
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
     const nameWithoutExt = fixMojibake(safeString(file?.name).replace(/\.[^/.]+$/, ""));
     const compactName = normalizeSigla(nameWithoutExt);
     const subjectSigla = getSubjectSigla(file);
+    const pathParts = normalizedPath
+        .split("/")
+        .filter(Boolean)
+        .filter((part) => part !== "." && part !== "..");
+    const nestedParts = pathParts.slice(1);
+    const contextualPath = normalizeComparable(`/${nestedParts.join("/")}/`);
 
-    const isAula = TIPO_PATTERNS.aula.some((pattern) => pattern.test(name) || pattern.test(path));
-    const isLista = TIPO_PATTERNS.lista.some((pattern) => pattern.test(name) || pattern.test(path));
-    const isResumo = TIPO_PATTERNS.resumo.some((pattern) => pattern.test(name) || pattern.test(path));
-    const isProva = TIPO_PATTERNS.prova.some((pattern) => pattern.test(name) || pattern.test(path));
+    const isAula = TIPO_PATTERNS.aula.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
+    const isLista = TIPO_PATTERNS.lista.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
+    const isResumo = TIPO_PATTERNS.resumo.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
+    const isProva = TIPO_PATTERNS.prova.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
     const isDocumentacao =
-        TIPO_PATTERNS.documentacao.some((pattern) => pattern.test(name) || pattern.test(path)) ||
+        TIPO_PATTERNS.documentacao.some((pattern) => pattern.test(name) || pattern.test(contextualPath)) ||
         TEXT_EXTENSIONS.has(extension);
-    const isMaterialFolder = MATERIAL_FOLDER_PATTERN.test(path);
+    const isAdministrative = TIPO_PATTERNS.administrativo.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
+    const isGabaritoResolucao = TIPO_PATTERNS.gabaritoResolucao.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
+    const isMaterialFolder = MATERIAL_FOLDER_PATTERN.test(contextualPath);
     const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path);
-    const isProvasFolder = /(^|\/)provas?(\/|$)/i.test(path);
-    const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(path);
+    const isRootProvasFolder = /^provas?(?:\b|\s|$)/i.test(normalizeComparable(pathParts[0] ?? ""));
+    const isProvasFolder = nestedParts.some((part) => /^provas?(?:\b|\s|$)/i.test(normalizeComparable(part)));
+    const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(contextualPath);
     const hasSemesterFolder = /(^|\/)s\d{1,2}(\/|$)/i.test(path);
     const hasAcademicSemester = /(?:19|20)\d{2}[._\-\s]?[12]/.test(path);
     const isOnlySubjectSigla = Boolean(subjectSigla) && compactName === subjectSigla;
 
     if (
-        ["dsn", "pdsprj"].includes(extension) &&
+        ["dsn", "pdsprj", "pdsit"].includes(extension) &&
         (isProvasFolder || isAssessmentFolder || (hasSemesterFolder && hasAcademicSemester && isOnlySubjectSigla))
     ) {
         return "Prova";
@@ -672,8 +716,20 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Plano de Ensino";
     }
 
+    if (isGabaritoResolucao) {
+        return "Gabarito/Resolução";
+    }
+
     if (isLista) {
         return "Lista de Exercícios";
+    }
+
+    if (isAdministrative) {
+        return "Administrativo/Estágio";
+    }
+
+    if (isRootProvasFolder && IMAGE_EXTENSIONS.has(extension) && hasSemesterFolder && hasAcademicSemester) {
+        return "Prova";
     }
 
     if (isProva || isProvasFolder || isAssessmentFolder) {
@@ -681,8 +737,8 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     }
 
     if (
-        TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(path)) ||
-        ["py", "c", "java", "pdsprj", "pdsbak", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
+        TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(contextualPath)) ||
+        ["py", "c", "java", "pdsprj", "pdsbak", "pdsit", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
     ) {
         return "Trabalho/Projeto";
     }
@@ -779,8 +835,10 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
     const upperPath = normalizeComparable(normalizedPath).toUpperCase();
 
-    if (sigla) {
+    if (isLikelySigla(sigla)) {
         tags.add(sigla);
+    } else if (subjectPart) {
+        tags.add(normalizeText(subjectPart));
     }
 
     if (semester) {
@@ -810,7 +868,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add(extensionTag);
     }
 
-    if (["dsn", "pdsprj", "m", "bdf", "bsf", "vpr", "sof", "pof"].includes(extension)) {
+    if (["dsn", "pdsprj", "pdsit", "m", "bdf", "bsf", "vpr", "sof", "pof"].includes(extension)) {
         tags.add("Simulação");
     }
 
@@ -818,7 +876,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Hardware");
     }
 
-    if (["dsn", "pdsprj"].includes(extension)) {
+    if (["dsn", "pdsprj", "pdsit"].includes(extension)) {
         tags.add("Projeto");
     }
 

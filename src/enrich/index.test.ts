@@ -27,6 +27,11 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S03/AC - Arquitetura de Computadores/2018.1 - PH/AP1.pdf", "AP1.pdf", "pdf")), "Arquitetura de Computadores");
     assert.equal(inferDisciplina(makeFile("/S02/CN - Calculo Numerico/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Cálculo Numérico");
     assert.equal(inferDisciplina(makeFile("/S02/GR - Grafos/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Grafos");
+    assert.equal(inferDisciplina(makeFile("/S04/PDS - Processamento Digital de Sinais/2020.2 - PH/AP1.pdf", "AP1.pdf", "pdf")), "Processamento Digital de Sinais");
+    assert.equal(inferDisciplina(makeFile("/S02/MD - Matematica Discreta/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Matemática Discreta");
+    assert.equal(inferDisciplina(makeFile("/S05/EI - Eletronica Industrial/2021.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Eletrônica Industrial");
+    assert.equal(inferDisciplina(makeFile("/S01/MCT - Metodologia Cientifica/2022.1 - PH/Trabalho.docx", "Trabalho.docx", "docx")), "Metodologia Científica");
+    assert.equal(inferDisciplina(makeFile("/S08/VC - Visao Computacional/2023.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Visão Computacional");
 });
 
 test("ignora pastas genericas na inferencia de disciplina", () => {
@@ -225,7 +230,31 @@ test("aceita disciplina em pasta especial sem sigla", () => {
     const file = makeFile("/Cadeiras com o Ronaldo/Lasca Ronaldo.gif", "Lasca Ronaldo.gif", "gif");
     assert.equal(inferDisciplina(file), "Cadeiras com o Ronaldo");
     const tags = inferTags(file);
-    assert.ok(tags.includes("CADEIRASCOMORONALDO"));
+    assert.ok(tags.includes("Cadeiras com o Ronaldo"));
+});
+
+test("nao usa pasta raiz provas para classificar tudo como prova", () => {
+    const file = makeFile("../provas//Tabelas/README.md", "README.md", "md");
+    assert.equal(inferTipo(file), "Documentação");
+});
+
+test("prioriza administrativo estagio sobre contexto de provas", () => {
+    const file = makeFile("../provas//Documentos/IFCE - ESTAGIO NAO OBRIGATORIO.pdf", "IFCE - ESTAGIO NAO OBRIGATORIO.pdf", "pdf");
+    assert.equal(inferTipo(file), "Administrativo/Estágio");
+});
+
+test("diferencia gabarito e resolucao", () => {
+    const gabarito = makeFile("/S01/CA - Calculo/2018.1 - PH/Gabarito AP1.pdf", "Gabarito AP1.pdf", "pdf");
+    const resolucao = makeFile("/S01/CA - Calculo/2018.1 - PH/Resolucao Lista 1.pdf", "Resolucao Lista 1.pdf", "pdf");
+    assert.equal(inferTipo(gabarito), "Gabarito/Resolução");
+    assert.equal(inferTipo(resolucao), "Gabarito/Resolução");
+});
+
+test("reconhece termos em ingles para prova e lista", () => {
+    const exam = makeFile("/S01/CA - Calculo/2018.1 - PH/Exam 1.pdf", "Exam 1.pdf", "pdf");
+    const assignment = makeFile("/S01/CA - Calculo/2018.1 - PH/Assignment 1.pdf", "Assignment 1.pdf", "pdf");
+    assert.equal(inferTipo(exam), "Prova");
+    assert.equal(inferTipo(assignment), "Lista de Exercícios");
 });
 
 test("interpreta pasta com sigla sem espacos no hifen", () => {
