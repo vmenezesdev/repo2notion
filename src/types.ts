@@ -1,3 +1,5 @@
+export type MigrationOptions = {}
+
 /**
  * A file in the repository scan result.
  */
@@ -10,7 +12,7 @@ export type RepoFile = {
 
 /**
  * A directory with nested children.
- */
+*/
 export type RepoDirectory = {
     kind: "directory";
     name: string;
@@ -18,11 +20,19 @@ export type RepoDirectory = {
     children: RepoNode[];
 }
 
-export type MigrationOptions = {}
-
-export type MigrationResult = {}
-
 /**
  * Node in repository tree scan result (file or directory).
  */
 export type RepoNode = RepoFile | RepoDirectory;
+
+export type RecordCandidate = {
+    title: string;
+    sourcePath: string;
+    tipo?: string;
+    disciplina?: string;
+    semester?: string;
+    url?: string;
+    tags: string[];
+}
+
+export type MigrationResult = {}

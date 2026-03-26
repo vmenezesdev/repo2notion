@@ -10,10 +10,10 @@ import { MigrationOptions, MigrationResult, RepoDirectory, RepoNode } from "./ty
 import { scanRepository } from "./scan";
 import { clearIntermediateResults, saveIntermediateResult } from "./util";
 import { clear } from "node:console";
+import { collectFiles } from "./extract";
 
 
 console.log("repo2notion starting...");
-console.log(process.argv)
 
 const apiKey = process.env.NOTION_API_KEY;
 const rootPageId = process.env.NOTION_ROOT_PAGE_ID;
@@ -33,15 +33,21 @@ if (!targetDir) {
 // migrateRepo: RepoPath Config -> MigrationResult
 async function migrateRepo(rootPath: string, _options: MigrationOptions): Promise<MigrationResult> {
     const repoTree = await scanRepository(rootPath);
-    await clearIntermediateResults(
-        ["repoTree.json"]
-    );
-    await saveIntermediateResult("repoTree.json", repoTree);
+    console.log("Repository scanned: ", JSON.stringify(repoTree, null, 2));
+    const files = collectFiles(repoTree);
 
-    console.log(repoTree);
+
     // const migrationPlan = buildMigrationPlan(repoTree, options);
     // const result = await executeMigrationPlan(migrationPlan, options);
+
+    await clearIntermediateResults(
+        ["repoTree.json", "files.json"]
+    );
+    await saveIntermediateResult("repoTree.json", repoTree);
+    await saveIntermediateResult("files.json", files);
+
     // return result;
+
     return {};
 }
 
