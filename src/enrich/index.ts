@@ -48,9 +48,45 @@ const NOISE_EXTENSIONS = new Set([
     "idx",
     "pack",
     "rev",
+    "cdb",
+    "hdb",
+    "qmsg",
+    "bpm",
+    "kpt",
+    "sci",
+    "logdb",
+    "idb",
+    "rdb",
+    "ddb",
+    "ammdb",
+    "qsf",
+    "qpf",
+    "qws",
+    "sft",
 ]);
 
-const COMPILED_ARTIFACT_EXTENSIONS = new Set(["hex", "map", "o", "lst", "pdsbak"]);
+const COMPILED_ARTIFACT_EXTENSIONS = new Set([
+    "hex",
+    "map",
+    "o",
+    "lst",
+    "pdsbak",
+    "cdb",
+    "hdb",
+    "qmsg",
+    "bpm",
+    "kpt",
+    "sci",
+    "logdb",
+    "idb",
+    "rdb",
+    "ddb",
+    "ammdb",
+    "qsf",
+    "qpf",
+    "qws",
+    "sft",
+]);
 
 const SEMESTER_REGEXES = [
     /\b((?:19|20)\d{2})[._\-\s]([12])\b/,
@@ -240,7 +276,29 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     JOACILLO: "Joacilo",
     "RICARDO RODRIGES": "Ricardo Rodriges",
     "RICARDO RODRIGUES": "Ricardo Rodrigues",
+    "CARLOS WAGNER": "Carlos Wagner",
+    MAURICIO: "Mauricio",
+    EDMAR: "Edmar",
+    "BRUNO MESQUITA": "Bruno Mesquita",
+    DIJALMA: "Dijalma",
 };
+
+const GENERIC_TITLE_TOKENS = new Set([
+    "prova",
+    "lista",
+    "trabalho",
+    "projeto",
+    "relatorio",
+    "relatório",
+    "main",
+    "exercicio",
+    "exercício",
+    "atividade",
+    "arquivo",
+    "documento",
+    "material",
+    "resumo",
+]);
 
 const PROFESSOR_CANONICAL_MAP = new Map(
     Object.entries(PROFESSOR_CANONICAL_MAP_RAW).map(([alias, canonical]) => [
@@ -306,6 +364,8 @@ function fixMojibake(value: unknown): string {
     }
 
     const replacements: Array<[RegExp, string]> = [
+        [/Ã_cios/g, "ícios"],
+        [/Ã_cio/g, "ício"],
         [/Ã¡/g, "á"],
         [/Ã /g, "à"],
         [/Ã¢/g, "â"],
@@ -395,11 +455,50 @@ function isLikelySigla(sigla: string): boolean {
         return false;
     }
 
+    if (/^(?:N|P|AP|AV)[1-4](?:\d+)?$/.test(sigla) || sigla === "AF") {
+        return false;
+    }
+
     if (DISCIPLINA_BY_SIGLA[sigla]) {
         return true;
     }
 
     return sigla.length <= 6 && /^[A-Z0-9]+$/.test(sigla);
+}
+
+function hasKnownProfessorAlias(value: unknown): boolean {
+    const comparableValue = normalizeComparable(value).toUpperCase();
+    if (!comparableValue) {
+        return false;
+    }
+
+    for (const alias of PROFESSOR_CANONICAL_MAP.keys()) {
+        if (alias.length < 3) {
+            continue;
+        }
+        if (comparableValue === alias || comparableValue.includes(` ${alias} `) || comparableValue.endsWith(` ${alias}`)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isLikelyProfessorFolder(part: string): boolean {
+    const normalizedPart = normalizeText(part);
+    if (!normalizedPart) {
+        return false;
+    }
+
+    if (/^(?:19|20)\d{2}[._\-\s]?[12]\s*[-–—]\s*[A-Za-zÀ-ÿ]/.test(normalizedPart)) {
+        return true;
+    }
+
+    if (/^(?:prof(?:essor)?\.?\s*)?[A-Za-zÀ-ÿ]{3,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3}$/.test(normalizedPart)) {
+        return hasKnownProfessorAlias(` ${normalizedPart} `);
+    }
+
+    return false;
 }
 
 function getSemesterNumberFromPath(path: unknown): number | null {
@@ -474,10 +573,13 @@ function getSubjectPart(path: unknown): string {
         const sigla = normalizeSigla(part);
         const isIgnoredFolder =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
-            /^s\d{2}$/i.test(part) ||
-            /^n\d$/i.test(part) ||
+            /^s\d{1,2}$/i.test(part) ||
+            /^n\d{1,2}$/i.test(part) ||
+            /^\d+$/.test(comparable) ||
+            /^\d+(?:[._\-]\d+)+$/.test(comparable) ||
             /^\d{4}$/.test(comparable) ||
-            /^\d{4}[._\-\s]?[12](?:\s*-\s*.+)?$/.test(comparable);
+            /^\d{4}[._\-\s]?[12](?:\s*[-–—]\s*.+)?$/.test(comparable) ||
+            isLikelyProfessorFolder(part);
         if (isIgnoredFolder) {
             continue;
         }
@@ -704,11 +806,12 @@ export function inferMetadata(
     }
 
     const extension = normalizeComparable(normalizedFile.extension).replace(/^\./, "");
-    if (options?.filterCodeFiles && COMPILED_ARTIFACT_EXTENSIONS.has(extension)) {
+    const shouldFilterCodeFiles = options?.filterCodeFiles ?? true;
+    if (shouldFilterCodeFiles && COMPILED_ARTIFACT_EXTENSIONS.has(extension)) {
         return null;
     }
 
-    if (options?.filterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile)) {
+    if (shouldFilterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile)) {
         return null;
     }
 
@@ -858,6 +961,20 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         return `${assessmentLabel} - ${semester}`;
     }
 
+    const normalizedCleanedName = normalizeComparable(cleanedName);
+    const isGenericTitle =
+        GENERIC_TITLE_TOKENS.has(normalizedCleanedName) ||
+        cleanedName.length <= 2 ||
+        /^\d+$/.test(cleanedName) ||
+        /^(?:n|av|ap|p)[1-4]$/i.test(cleanedName);
+
+    if (isGenericTitle && (subjectSigla || semester)) {
+        const contextualParts = [subjectSigla, cleanedName, semester].filter(Boolean);
+        if (contextualParts.length > 1) {
+            return contextualParts.join(" - ");
+        }
+    }
+
     return cleanedName || normalizeText(nameWithoutExt) || originalName;
 }
 
@@ -971,19 +1088,23 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const comparable = normalizeComparable(part);
         const { sigla, name } = getSiglaAndName(part);
         const hasLetterInSigla = /[A-Z]/.test(sigla);
-        const isAmbiguousSigla = Boolean(DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla]);
         const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(part);
+
+        if (isLikelyProfessorFolder(part)) {
+            continue;
+        }
 
         if (sigla && hasLetterInSigla) {
             const resolvedByContext = resolveDisciplinaBySigla(sigla, path);
             if (name) {
                 const normalizedName = normalizeText(name);
-                if (!resolvedByContext) {
-                    return normalizedName;
+                if (hasExplicitName) {
+                    const hasRomanOrLevelQualifier = /\b(?:[ivxlcdm]+|\d+)\b/i.test(normalizedName);
+                    if (hasRomanOrLevelQualifier || !resolvedByContext) {
+                        return normalizedName;
+                    }
                 }
-                const normalizedResolved = normalizeComparable(resolvedByContext);
-                const normalizedExtracted = normalizeComparable(normalizedName);
-                if (isAmbiguousSigla && hasExplicitName && normalizedResolved !== normalizedExtracted) {
+                if (!resolvedByContext) {
                     return normalizedName;
                 }
                 return resolvedByContext;
@@ -997,7 +1118,8 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
             /^documentos(?:\b|\s*[-_])/i.test(comparable) ||
             /^[sn]\d{1,2}$/i.test(comparable) ||
-            /^\d{4}/.test(comparable);
+            /^\d{4}/.test(comparable) ||
+            /^\d+(?:[._\-]\d+)+$/.test(comparable);
         if (isIgnored) {
             continue;
         }
@@ -1102,7 +1224,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         const part = fixMojibake(pathParts[i]).trim();
         const normalizedPart = normalizeComparable(part);
 
-        const yearDashProfessor = part.match(/^(?:19|20)\d{2}[._\-\s]?[12]\s*-\s*(.+)$/i);
+        const yearDashProfessor = part.match(/^(?:19|20)\d{2}[._\-\s]?[12]\s*[-–—]\s*(.+)$/i);
         if (yearDashProfessor?.[1]) {
             const candidate = yearDashProfessor[1].trim();
             if (candidate.length >= 2 && /[A-Za-z]/.test(candidate)) {

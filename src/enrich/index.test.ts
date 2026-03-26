@@ -48,7 +48,7 @@ test("ignora pastas genericas na inferencia de disciplina", () => {
         "PUD Calculo I.doc",
         "doc",
     );
-    assert.equal(inferDisciplina(file), "Cálculo");
+    assert.equal(inferDisciplina(file), "Calculo I");
 });
 
 test("extrai disciplina do nome do arquivo em pastas PUDS genericas", () => {
@@ -119,6 +119,17 @@ test("limpa titulo tecnico de hardware com extensao encadeada", () => {
 test("corrige mojibake comum brasileiro", () => {
     const file = makeFile("/S02/EA - Eletronica Analogica/2019.2 - MJ/ExercÃ_cio_1.pdf", "ExercÃ_cio_1.pdf", "pdf");
     assert.equal(normalizeTitle(file), "Exercício 1");
+
+    const pluralFile = makeFile("/S02/EA - Eletronica Analogica/2019.2 - MJ/ExercÃ_cios_2.pdf", "ExercÃ_cios_2.pdf", "pdf");
+    assert.equal(normalizeTitle(pluralFile), "Exercícios 2");
+});
+
+test("contextualiza titulos genericos com sigla e semestre", () => {
+    const prova = makeFile("/S05/SO - Sistemas Operacionais/2015.2 - Dijalma/Prova.pdf", "Prova.pdf", "pdf");
+    assert.equal(normalizeTitle(prova), "SO - Prova - 2015.2");
+
+    const main = makeFile("/S04/CA - Calculo I/2018.1 - PH/main.c", "main.c", "c");
+    assert.equal(normalizeTitle(main), "CA - Main - 2018.1");
 });
 
 test("normaliza unicode decomposto na inferencia de disciplina", () => {
@@ -284,6 +295,11 @@ test("normaliza professor canonico novo", () => {
     assert.ok(tags.includes("Fernando Macedo"));
 });
 
+test("captura novos professores por padrao ano-semestre", () => {
+    const tags = inferTags(makeFile("/S05/SO - Sistemas Operacionais/2015.2 - Carlos Wagner/Prova.pdf", "Prova.pdf", "pdf"));
+    assert.ok(tags.includes("Carlos Wagner"));
+});
+
 test("remove prefixo numerico de ordenacao no titulo", () => {
     const file = makeFile("/S01/ED - Eletronica Digital/2018.1 - PH/1 - PRATICA_DE_ELETRONICA_DIGITAL_II.pdf", "1 - PRATICA_DE_ELETRONICA_DIGITAL_II.pdf", "pdf");
     assert.equal(normalizeTitle(file), "PRATICA DE ELETRONICA DIGITAL II");
@@ -334,6 +350,26 @@ test("mantem filtro de codigo em contexto nao tecnico", () => {
     const genericCode = makeFile("/S04/PT - Producao Textual/2022.2 - PH/script.c", "script.c", "c");
     const metadata = inferMetadata(genericCode, { filterCodeFiles: true });
     assert.equal(metadata, null);
+});
+
+test("ativa filtro de codigo por padrao fora de contexto tecnico", () => {
+    const genericCode = makeFile("/S04/PT - Producao Textual/2022.2 - PH/script.c", "script.c", "c");
+    assert.equal(inferMetadata(genericCode), null);
+
+    const technicalCode = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/main.c", "main.c", "c");
+    assert.notEqual(inferMetadata(technicalCode), null);
+});
+
+test("filtra artefatos compilados de quartus e proteus", () => {
+    const cdbFile = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/relogio.cdb", "relogio.cdb", "cdb");
+    const qmsgFile = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/relogio.qmsg", "relogio.qmsg", "qmsg");
+    assert.equal(inferMetadata(cdbFile), null);
+    assert.equal(inferMetadata(qmsgFile), null);
+});
+
+test("nao usa pasta de professor como disciplina", () => {
+    const file = makeFile("/S05/2015.2 - Dijalma/SO - Sistemas Operacionais/N1.pdf", "N1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Sistemas Operacionais");
 });
 
 test("aceita fallback de semestre somente com ano", () => {
