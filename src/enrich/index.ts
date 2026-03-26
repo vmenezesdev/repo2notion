@@ -98,7 +98,8 @@ const IGNORED_SUBJECT_FOLDERS = new Set([
 
 const TIPO_PATTERNS = {
     prova: [
-        /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|af|prova|avaliac[aã]o|simulado)(\b|$)/i,
+        /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|n[1-4](?:[._-]\d+)?|af|prova|avaliac[aã]o|simulado)(\b|$)/i,
+        /(^|\b)(?:av|ap|p)\s*parcial\s*\d(\b|$)/i,
         /(\/|\b)(provas?|avaliac(?:oes|o(?:es)?)|simulados?)(\/|\b)/i,
     ],
     lista: [
@@ -159,7 +160,7 @@ const TAG_BY_EXTENSION: Record<string, string> = {
 };
 
 function safeString(value: unknown): string {
-    return typeof value === "string" ? value : "";
+    return typeof value === "string" ? value.normalize("NFC") : "";
 }
 
 function normalizePath(path: unknown): string {
@@ -331,7 +332,11 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     const normalizedSubject = fixMojibake(subjectPart).trim();
-    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s-\s/);
+    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*-\s*(.+)$/);
+    const compactSigla = normalizeSigla(compactSiglaMatch?.[1] ?? "");
+    const [siglaRaw, ...nameParts] = compactSiglaMatch && DISCIPLINA_BY_SIGLA[compactSigla]
+        ? [compactSiglaMatch[1], compactSiglaMatch[2]]
+        : normalizedSubject.split(/\s-\s/);
     const sigla = normalizeSigla(siglaRaw ?? "");
     const name = nameParts.join(" - ").trim();
 
@@ -379,9 +384,14 @@ function isCodeFile(file: RepoFile | null | undefined): boolean {
 function getAssessmentLabel(nameWithoutExt: string): string {
     const text = normalizeComparable(nameWithoutExt);
 
-    const partialMatch = text.match(/\b(?:ap|av|p|avaliacao|prova)\s*parcial\s*(\d)\b/i);
+    const partialMatch = text.match(/\b(?:ap|av|p|avaliacao|prova)?\s*parcial\s*(\d)\b/i);
     if (partialMatch) {
         return `AV${partialMatch[1]}`;
+    }
+
+    const decimalGradeMatch = text.match(/\bn\s*([1-4])(?:[._-]\s*(\d+))\b/i);
+    if (decimalGradeMatch) {
+        return `N${decimalGradeMatch[1]}.${decimalGradeMatch[2]}`;
     }
 
     const compactMatch = text.match(/\b(ap|av|p|n)\s*(\d)\b/i);
@@ -486,6 +496,22 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         cleanedName = cleanedName.replace(/^\s*(?:lista)\b[:\-\s]*/i, "").trim();
     }
 
+    const normalizedName = normalizeComparable(nameWithoutExt);
+    const partMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg|p)\s*(\d+)\b/i);
+    if (partMatch) {
+        const baseTitle = cleanedName
+            .replace(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg|p)\s*\d+\b/gi, "")
+            .replace(/\s{2,}/g, " ")
+            .trim();
+        let finalBaseTitle = baseTitle || cleanedName;
+        if (tipo === "Lista de Exercícios" && /^\d+$/.test(finalBaseTitle)) {
+            finalBaseTitle = `Lista ${finalBaseTitle}`;
+        }
+        if (finalBaseTitle) {
+            return `${finalBaseTitle} (Parte ${partMatch[1]})`;
+        }
+    }
+
     if (!cleanedName) {
         cleanedName = normalizeText(nameWithoutExt);
     }
@@ -493,7 +519,6 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
 
     if (tipo === "Prova" && isImage) {
-        const normalizedName = normalizeComparable(nameWithoutExt);
         const gradeMatch = normalizedName.match(/\bn\s*([1-4])\b/i);
         const explicitPart = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg)\s*(\d+)\b/i)?.[1];
         const sequentialPart = normalizedName.match(/\bn\s*[1-4]\D+(\d+)\b/i)?.[1];
@@ -531,8 +556,9 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isMaterialFolder = MATERIAL_FOLDER_PATTERN.test(path);
     const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path);
     const isProvasFolder = /(^|\/)provas?(\/|$)/i.test(path);
+    const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(path);
 
-    if (isProva || isProvasFolder) {
+    if (isProva || isProvasFolder || isAssessmentFolder) {
         return "Prova";
     }
 
@@ -582,7 +608,9 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         return fixMojibake(name);
     }
 
-    return fixMojibake(subjectPart || "Geral");
+    return fixMojibake(subjectPart || "Geral")
+        .replace(/^\s*s\d{1,2}\s*[-_]?\s*/i, "")
+        .trim();
 }
 
 export function inferSemester(file: RepoFile | null | undefined): string {
@@ -636,9 +664,13 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Hardware");
     }
 
+    if (["dsn", "pdsprj"].includes(extension)) {
+        tags.add("Projeto");
+    }
+
     let profName = "";
 
-    const professorMatch = fixMojibake(normalizedPath).match(/\d{4}[._\-\s]?[12]\s*-\s*([^/]+)/i);
+    const professorMatch = fixMojibake(normalizedPath).match(/(?:^|\/)(?:19|20)\d{2}[._\-\s]?[12]\s*-\s*([^/]+?)(?=\/|$)/i);
     if (professorMatch) {
         profName = professorMatch[1].trim();
     } else {

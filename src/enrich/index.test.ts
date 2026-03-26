@@ -64,6 +64,11 @@ test("corrige mojibake comum brasileiro", () => {
     assert.equal(normalizeTitle(file), "Exercício 1");
 });
 
+test("normaliza unicode decomposto na inferencia de disciplina", () => {
+    const file = makeFile("/S01/ED - Eletro\u0302nica Digital/2018.1 - PH/PUD Eletro\u0302nica Digital.doc", "PUD Eletro\u0302nica Digital.doc", "doc");
+    assert.equal(inferDisciplina(file), "Eletrônica Digital");
+});
+
 test("captura professor com sigla curta", () => {
     const tags = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AP1.pdf", "AP1.pdf", "pdf"));
     assert.ok(tags.includes("JB"));
@@ -79,6 +84,23 @@ test("prioriza tipo prova sobre documentacao", () => {
     assert.equal(tipo, "Prova");
 });
 
+test("usa contexto de pasta de avaliacao para tipo prova", () => {
+    const tipo = inferTipo(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg"));
+    assert.equal(tipo, "Prova");
+    assert.equal(normalizeTitle(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg")), "Lista 1 (Parte 2)");
+});
+
+test("captura rotulos de avaliacao com parcial e nota decimal", () => {
+    const parcial = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AV Parcial 3.pdf", "AV Parcial 3.pdf", "pdf"));
+    assert.ok(parcial.includes("AV3"));
+
+    const decimal = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/N1.2.pdf", "N1.2.pdf", "pdf"));
+    assert.ok(decimal.includes("N1.2"));
+
+    const af = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AF Ultimate.pdf", "AF Ultimate.pdf", "pdf"));
+    assert.ok(af.includes("AF"));
+});
+
 test("classifica binarios de firmware como hardware/projeto", () => {
     const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.hex", "projeto_final.hex", "hex");
     assert.equal(inferTipo(file), "Trabalho/Projeto");
@@ -92,6 +114,23 @@ test("classifica pdsbak como hardware e proteus", () => {
     const tags = inferTags(file);
     assert.ok(tags.includes("Hardware"));
     assert.ok(tags.includes("Proteus"));
+});
+
+test("adiciona tag projeto para arquivos de proteus", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.pdsprj", "projeto_final.pdsprj", "pdsprj");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("Projeto"));
+    assert.ok(tags.includes("Hardware"));
+});
+
+test("aceita disciplina em pasta especial sem sigla", () => {
+    const file = makeFile("/Cadeiras com o Ronaldo/Lasca Ronaldo.gif", "Lasca Ronaldo.gif", "gif");
+    assert.equal(inferDisciplina(file), "Cadeiras com o Ronaldo");
+});
+
+test("interpreta pasta com sigla sem espacos no hifen", () => {
+    const file = makeFile("/BEPID-Apple/Projeto 1.docx", "Projeto 1.docx", "docx");
+    assert.equal(inferDisciplina(file), "BEPID Apple");
 });
 
 test("nao filtra codigo em disciplinas tecnicas", () => {
