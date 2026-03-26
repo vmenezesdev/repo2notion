@@ -363,10 +363,14 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
 
     const normalizedSubject = fixMojibake(subjectPart).trim();
     const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*-\s*(.+)$/);
-    const compactSigla = normalizeSigla(compactSiglaMatch?.[1] ?? "");
-    const [siglaRaw, ...nameParts] = compactSiglaMatch && DISCIPLINA_BY_SIGLA[compactSigla]
-        ? [compactSiglaMatch[1], compactSiglaMatch[2]]
-        : normalizedSubject.split(/\s-\s/);
+    if (compactSiglaMatch) {
+        return {
+            sigla: normalizeSigla(compactSiglaMatch[1]),
+            name: compactSiglaMatch[2].trim(),
+        };
+    }
+
+    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s-\s/);
     const sigla = normalizeSigla(siglaRaw ?? "");
     const name = nameParts.join(" - ").trim();
 
@@ -528,13 +532,24 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     if (tipo === "Lista de Exercícios") {
         cleanedName = cleanedName.replace(/^\s*(?:lista)\b[:\-\s]*/i, "").trim();
+        if (/^\d+$/.test(cleanedName)) {
+            cleanedName = `Lista ${cleanedName}`;
+        }
     }
 
     const normalizedName = normalizeComparable(nameWithoutExt);
-    const partMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg|p)\s*(\d+)\b/i);
-    if (partMatch) {
+    const explicitPartMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*(\d+)\b/i);
+    const shortPartMatch = normalizedName.match(/\bp\s*(\d+)\b/i);
+    const shortPartNumber = shortPartMatch ? Number.parseInt(shortPartMatch[1], 10) : Number.NaN;
+    const part = explicitPartMatch?.[1] ?? (Number.isFinite(shortPartNumber) && shortPartNumber > 4 ? shortPartMatch?.[1] : "");
+    const isNumericList = tipo === "Lista de Exercícios" && /^lista\s+\d+$/i.test(cleanedName);
+
+    if (part && !isNumericList) {
+        const partPattern = explicitPartMatch
+            ? /\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*\d+\b/gi
+            : /\bp\s*\d+\b/gi;
         const baseTitle = cleanedName
-            .replace(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg|p)\s*\d+\b/gi, "")
+            .replace(partPattern, "")
             .replace(/\s{2,}/g, " ")
             .trim();
         let finalBaseTitle = baseTitle || cleanedName;
@@ -542,7 +557,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             finalBaseTitle = `Lista ${finalBaseTitle}`;
         }
         if (finalBaseTitle) {
-            return `${finalBaseTitle} (Parte ${partMatch[1]})`;
+            return `${finalBaseTitle} (Parte ${part})`;
         }
     }
 
@@ -609,6 +624,10 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Prova";
     }
 
+    if (isLista) {
+        return "Lista de Exercícios";
+    }
+
     if (isProva || isProvasFolder || isAssessmentFolder) {
         return "Prova";
     }
@@ -618,10 +637,6 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         ["py", "c", "java", "pdsprj", "pdsbak", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
     ) {
         return "Trabalho/Projeto";
-    }
-
-    if (isLista) {
-        return "Lista de Exercícios";
     }
 
     if (isAula || (isMaterialFolder && !isProva)) {

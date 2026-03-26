@@ -103,10 +103,20 @@ test("prioriza tipo prova sobre documentacao", () => {
     assert.equal(tipo, "Prova");
 });
 
-test("usa contexto de pasta de avaliacao para tipo prova", () => {
+test("prioriza lista explicita mesmo em pasta de avaliacao", () => {
     const tipo = inferTipo(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg"));
-    assert.equal(tipo, "Prova");
+    assert.equal(tipo, "Lista de Exercícios");
     assert.equal(normalizeTitle(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg")), "Lista 1 (Parte 2)");
+});
+
+test("nao interpreta P1 como parte do titulo", () => {
+    const file = makeFile("/S01/CA - Calculo/2018.1 - PH/Calculo P1.pdf", "Calculo P1.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "CA - AV1 - 2018.1");
+});
+
+test("preserva lista numerica sem converter em parte", () => {
+    const file = makeFile("/S01/CA - Calculo/2018.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Lista 1");
 });
 
 test("captura rotulos de avaliacao com parcial e nota decimal", () => {
