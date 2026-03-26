@@ -154,7 +154,7 @@ test("captura professor composto em pasta ano-semestre", () => {
 
 test("nao mistura ricardo rodriges com ricardo taveira", () => {
     const tagsRodriges = inferTags(makeFile("/S04/SD - Sistemas Distribuidos/2020.2 - Ricardo Rodriges/AP1.pdf", "AP1.pdf", "pdf"));
-    assert.ok(tagsRodriges.includes("Ricardo Rodriges"));
+    assert.ok(tagsRodriges.includes("Ricardo Rodrigues"));
     assert.ok(!tagsRodriges.includes("Ricardo Duarte Taveira"));
 
     const tagsTaveira = inferTags(makeFile("/S04/SD - Sistemas Distribuidos/2020.2 - Ricardo Taveira/AP1.pdf", "AP1.pdf", "pdf"));
@@ -261,6 +261,15 @@ test("normaliza path com barras duplas em inferMetadata", () => {
 test("sequencia de imagem curta usa contexto da disciplina", () => {
     const file = makeFile("/S01/ED - Eletronica Digital/2019.1 - JB/VS01_01.jpg", "VS01_01.jpg", "jpg");
     assert.equal(normalizeTitle(file), "Prova - Eletrônica Digital (Parte 01)");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("VS1"));
+});
+
+test("reconhece VS como prova", () => {
+    const file = makeFile("/S01/CA - Calculo/2019.1 - PH/VS.pdf", "VS.pdf", "pdf");
+    assert.equal(inferTipo(file), "Prova");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("VS"));
 });
 
 test("nao filtra codigo tecnico em AC, CG, CN e GAA", () => {
@@ -425,6 +434,29 @@ test("inferencia de semestre nao perde estado entre chamadas", () => {
     const file = makeFile("/S01/CA - Calculo/2019.1/AP1.pdf", "AP1.pdf", "pdf");
     assert.equal(inferSemester(file), "2019.1");
     assert.equal(inferSemester(file), "2019.1");
+});
+
+test("prioriza semestre no nome do arquivo sobre pasta", () => {
+    const file = makeFile("/S01/CA - Calculo/2017.1 - PH/Prova_2018_2.pdf", "Prova_2018_2.pdf", "pdf");
+    assert.equal(inferSemester(file), "2018.2");
+});
+
+test("prioriza semestre academico da pasta sobre ano solto no arquivo", () => {
+    const file = makeFile("/S01/CA - Calculo/2024.1 - PH/IMG_2023.jpg", "IMG_2023.jpg", "jpg");
+    assert.equal(inferSemester(file), "2024.1");
+});
+
+test("desambigua ED por palavra-chave no caminho", () => {
+    const edDigital = makeFile("../provas//S01/ED - Eletronica Digital/2024.2 - Carlos Wagner/ED_AV2.pdf", "ED_AV2.pdf", "pdf");
+    assert.equal(inferDisciplina(edDigital), "Eletrônica Digital");
+
+    const edEstrutura = makeFile("/S03/ED - Estrutura de Dados/2024.1 - Wagner/ED_AV2.pdf", "ED_AV2.pdf", "pdf");
+    assert.equal(inferDisciplina(edEstrutura), "Estrutura de Dados");
+});
+
+test("ignora pasta informal de professor ao inferir disciplina", () => {
+    const file = makeFile("/S03/EDA - Estrutura de Dados/Cadeiras com o Ronaldo/aula1.pdf", "aula1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Estrutura de Dados");
 });
 
 test("usa semestre da grade quando nao existe ano letivo", () => {

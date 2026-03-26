@@ -216,7 +216,7 @@ const GENERIC_CONTEXT_FOLDERS = new Set([
 
 const TIPO_PATTERNS = {
     prova: [
-        /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|n[1-4](?:[._-]\d+)?|af|prova|avaliac[aã]o|simulado)(\b|$)/i,
+        /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|n[1-4](?:[._-]\d+)?|af|vs|prova|avaliac[aã]o|simulado)(\b|$)/i,
         /(^|\b)(?:av|ap|p)\s*parcial\s*\d(\b|$)/i,
         /(^|\b)(exam|midterm|final\s*exam|test|quiz)(\b|$)/i,
         /(\/|\b)(provas?|avaliac(?:oes|o(?:es)?)|simulados?)(\/|\b)/i,
@@ -314,7 +314,7 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     PH: "Paulo Henrique",
     JOACILO: "Joacilo",
     JOACILLO: "Joacilo",
-    "RICARDO RODRIGES": "Ricardo Rodriges",
+    "RICARDO RODRIGES": "Ricardo Rodrigues",
     "RICARDO RODRIGUES": "Ricardo Rodrigues",
     "CARLOS WAGNER": "Carlos Wagner",
     MAURICIO: "Mauricio",
@@ -565,6 +565,11 @@ function isLikelyProfessorFolder(part: string): boolean {
         return false;
     }
 
+    const wrappedPart = ` ${normalizedPart} `;
+    if (hasKnownProfessorAlias(wrappedPart) && /\b(?:prof(?:essor)?|cadeiras?|turmas?|com)\b/i.test(normalizedPart)) {
+        return true;
+    }
+
     if (/^(?:19|20)\d{2}[._\-\s]?[12]\s*[-–—]\s*[A-Za-zÀ-ÿ]/.test(normalizedPart)) {
         return true;
     }
@@ -597,6 +602,15 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     }
 
     const normalizedPath = normalizeComparable(path).toUpperCase();
+
+    if (sigla === "ED") {
+        if (/\bESTRUTURA\b|\bDADOS\b/.test(normalizedPath)) {
+            return "Estrutura de Dados";
+        }
+        if (/\bELETRONICA\b|\bDIGITAL\b/.test(normalizedPath)) {
+            return "Eletrônica Digital";
+        }
+    }
 
     if (sigla === "ED" && /\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
         return "Estrutura de Dados";
@@ -637,6 +651,30 @@ function getSemesterFromText(value: unknown): string {
             return `${match[1]}.${match[2]}`;
         }
     }
+
+    const yearMatch = text.match(YEAR_REGEX);
+    if (yearMatch) {
+        return yearMatch[1];
+    }
+
+    return "";
+}
+
+function getAcademicSemesterFromText(value: unknown): string {
+    const text = normalizeComparable(value);
+
+    for (const regex of SEMESTER_REGEXES) {
+        const match = regex.exec(text);
+        if (match) {
+            return `${match[1]}.${match[2]}`;
+        }
+    }
+
+    return "";
+}
+
+function getYearFromText(value: unknown): string {
+    const text = normalizeComparable(value);
 
     const yearMatch = text.match(YEAR_REGEX);
     if (yearMatch) {
@@ -946,6 +984,15 @@ function getAssessmentLabel(nameWithoutExt: string): string {
         return "AF";
     }
 
+    const vsMatch = text.match(/\bvs\s*0*([1-4])\b/i);
+    if (vsMatch?.[1]) {
+        return `VS${vsMatch[1]}`;
+    }
+
+    if (/\bvs\b/i.test(text)) {
+        return "VS";
+    }
+
     return "";
 }
 
@@ -1066,6 +1113,13 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .replace(/\b(?:editad[oa]|final)\b/gi, "")
             .replace(/\s+/g, " ")
             .trim();
+
+        const provaNumberMatch =
+            cleanedName.match(/\b(?:prova|avaliac(?:ao|ão)|av|ap|p)\s*[-:_]?\s*([1-4])\b/i) ||
+            normalizeText(nameWithoutExt).match(/\b(?:prova|avaliac(?:ao|ão)|av|ap|p)\s*[-:_]?\s*([1-4])\b/i);
+        if (provaNumberMatch?.[1] && !/\bn\s*[1-4]\b/i.test(cleanedName)) {
+            cleanedName = `Prova ${provaNumberMatch[1]}`;
+        }
 
         const numberedProvaMatch = cleanedName.match(/^\s*prova\s*[-_ ]?(\d+)\s*$/i);
         if (numberedProvaMatch?.[1]) {
@@ -1189,10 +1243,11 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         }
 
         const gradeMatch = normalizedName.match(/\bn\s*([1-4])\b/i);
+        const provaNumberMatch = normalizedName.match(/\b(?:prova|avaliacao|av|ap|p)\s*([1-4])\b/i);
         const explicitPart = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg)\s*(\d+)\b/i)?.[1];
         const sequentialPart = normalizedName.match(/\bn\s*[1-4]\D+(\d+)\b/i)?.[1];
         const part = explicitPart || sequentialPart;
-        const base = gradeMatch ? `Prova N${gradeMatch[1]}` : "Prova";
+        const base = gradeMatch ? `Prova N${gradeMatch[1]}` : provaNumberMatch?.[1] ? `Prova ${provaNumberMatch[1]}` : "Prova";
         if (part) {
             return `${base} (Parte ${part})`;
         }
@@ -1431,11 +1486,30 @@ function getGradeSemesterFromPath(path: unknown): string {
 }
 
 export function inferSemester(file: RepoFile | null | undefined): string {
-    const semesterFromText = getSemesterFromText(`${normalizePath(file?.path)} ${safeString(file?.name)}`);
-    if (semesterFromText) {
-        return semesterFromText;
+    const name = safeString(file?.name);
+    const path = normalizePath(file?.path);
+
+    const semesterFromName = getAcademicSemesterFromText(name);
+    if (semesterFromName) {
+        return semesterFromName;
     }
-    return getGradeSemesterFromPath(file?.path);
+
+    const semesterFromPath = getAcademicSemesterFromText(path);
+    if (semesterFromPath) {
+        return semesterFromPath;
+    }
+
+    const yearFromName = getYearFromText(name);
+    if (yearFromName) {
+        return yearFromName;
+    }
+
+    const yearFromPath = getYearFromText(path);
+    if (yearFromPath) {
+        return yearFromPath;
+    }
+
+    return getGradeSemesterFromPath(path);
 }
 
 export function inferTags(file: RepoFile | null | undefined): string[] {
