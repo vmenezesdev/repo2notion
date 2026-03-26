@@ -164,8 +164,10 @@ test("nao mistura ricardo rodriges com ricardo taveira", () => {
 test("desambigua ED por professor no caminho", () => {
     const edDigital = makeFile("/S03/ED/2022.1 - JB/AP1.pdf", "AP1.pdf", "pdf");
     const edEstrutura = makeFile("/S01/ED/2022.1 - Alisson/AP1.pdf", "AP1.pdf", "pdf");
+    const edErnani = makeFile("/S01/ED/2022.1 - Ernani Leite/AP1.pdf", "AP1.pdf", "pdf");
     assert.equal(inferDisciplina(edDigital), "Estrutura de Dados");
-    assert.equal(inferDisciplina(edEstrutura), "Eletrônica Digital");
+    assert.equal(inferDisciplina(edEstrutura), "Estrutura de Dados");
+    assert.equal(inferDisciplina(edErnani), "Estrutura de Dados");
 });
 
 test("prioriza tipo prova sobre documentacao", () => {
@@ -258,7 +260,34 @@ test("normaliza path com barras duplas em inferMetadata", () => {
 
 test("sequencia de imagem curta usa contexto da disciplina", () => {
     const file = makeFile("/S01/ED - Eletronica Digital/2019.1 - JB/VS01_01.jpg", "VS01_01.jpg", "jpg");
-    assert.equal(normalizeTitle(file), "Eletrônica Digital - Parte 01");
+    assert.equal(normalizeTitle(file), "Prova - Eletrônica Digital (Parte 01)");
+});
+
+test("nao filtra codigo tecnico em AC, CG, CN e GAA", () => {
+    const acCode = makeFile("/S03/AC - Arquitetura de Computadores/2022.1 - PH/main.c", "main.c", "c");
+    const cgCode = makeFile("/S07/CG - Computacao Grafica/2022.1 - PH/cubo.m", "cubo.m", "m");
+    const cnCode = makeFile("/S05/CN - Calculo Numerico/2022.1 - PH/ep1.c", "ep1.c", "c");
+    const gaaCode = makeFile("/S04/GAA - Geometria Analitica e Algebra Linear/2022.1 - Valberto/gaal.py", "gaal.py", "py");
+
+    assert.notEqual(inferMetadata(acCode, { filterCodeFiles: true }), null);
+    assert.notEqual(inferMetadata(cgCode, { filterCodeFiles: true }), null);
+    assert.notEqual(inferMetadata(cnCode, { filterCodeFiles: true }), null);
+    assert.notEqual(inferMetadata(gaaCode, { filterCodeFiles: true }), null);
+});
+
+test("deduplica semestre no titulo quando ja inferido", () => {
+    const file = makeFile("/S05/CN - Calculo Numerico/2020.1 - Joao Gabriel/calcnum 2020.1 avaliacao1.pdf", "calcnum 2020.1 avaliacao1.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Calcnum avaliacao1");
+});
+
+test("normaliza novos professores no caminho", () => {
+    const tagsValberto = inferTags(makeFile("/S04/GAA - Geometria Analitica e Algebra Linear/2022.1 - Valberto/Lista1.pdf", "Lista1.pdf", "pdf"));
+    const tagsAndreia = inferTags(makeFile("/S07/GP - Gerenciamento de Projetos/2022.2 - Andreia Rodrigues/Trabalho.pdf", "Trabalho.pdf", "pdf"));
+    const tagsPauloDiego = inferTags(makeFile("/S06/SEMBS - Sistemas Embarcados/2022.2 - Paulo Diego/Projeto.pdsprj", "Projeto.pdsprj", "pdsprj"));
+
+    assert.ok(tagsValberto.includes("Valberto"));
+    assert.ok(tagsAndreia.includes("Andréia Rodrigues"));
+    assert.ok(tagsPauloDiego.includes("Paulo Diego"));
 });
 
 test("adiciona tag projeto para arquivos de proteus", () => {
@@ -372,6 +401,21 @@ test("nao usa pasta de professor como disciplina", () => {
     assert.equal(inferDisciplina(file), "Sistemas Operacionais");
 });
 
+test("ignora subpastas tecnicas genericas ao inferir disciplina", () => {
+    const file = makeFile("/S03/EDA - Estrutura de Dados/2022.1 - Ernani Leite/Trabalho1/src/main.c", "main.c", "c");
+    assert.equal(inferDisciplina(file), "Estrutura de Dados");
+    const metadata = inferMetadata(file, { filterCodeFiles: true });
+    assert.notEqual(metadata, null);
+    assert.equal(metadata?.disciplina, "Estrutura de Dados");
+});
+
+test("descarta lixo de pastas db e output_files", () => {
+    const dbFile = makeFile("/S01/ED - Eletronica Digital/2022.1 - JB/relogio/db/relogio.cdb", "relogio.cdb", "cdb");
+    const outputFile = makeFile("/S01/ED - Eletronica Digital/2022.1 - JB/relogio/output_files/relogio.sof", "relogio.sof", "sof");
+    assert.equal(inferMetadata(dbFile), null);
+    assert.equal(inferMetadata(outputFile), null);
+});
+
 test("aceita fallback de semestre somente com ano", () => {
     const onlyYear = makeFile("/S01/CA - Calculo/2013/Lista1.pdf", "Lista1.pdf", "pdf");
     assert.equal(inferSemester(onlyYear), "2013");
@@ -391,6 +435,16 @@ test("usa semestre da grade quando nao existe ano letivo", () => {
 test("contextualiza titulo generico com disciplina e tipo", () => {
     const file = makeFile("/S10/EF - Etica e Filosofia/material.txt", "material.txt", "txt");
     assert.equal(normalizeTitle(file), "Ética e Filosofia - Material Complementar");
+});
+
+test("remove sufixos de copia e versao do titulo", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/Cópia de Prova_v2_editado.pdf", "Cópia de Prova_v2_editado.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Calculo I - Prova");
+});
+
+test("usa contexto em imagens genericas de prova", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/Provas/IMG_2023.jpg", "IMG_2023.jpg", "jpg");
+    assert.equal(normalizeTitle(file), "Prova - Calculo I - 2024.1 (Imagem)");
 });
 
 test("herda contexto para imagem em pasta ignorada", () => {

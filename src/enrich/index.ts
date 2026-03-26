@@ -12,12 +12,23 @@ const NOISE_PATH_MARKERS = [
     "/logs/",
     "/refs/",
     "/lfs/",
+    "/obj/",
+    "/bin/",
+    "/.vs/",
+    "/ipch/",
     "/__pycache__/",
     "/venv/",
     "/.venv/",
     "/conteudo anterior/",
     "/conteúdo anterior/",
 ];
+
+const NOISE_FOLDER_PARTS = new Set([
+    "db",
+    "incremental db",
+    "simulation",
+    "output files",
+]);
 
 const NOISE_FILE_NAMES = new Set([
     ".ds_store",
@@ -178,6 +189,31 @@ const IGNORED_SUBJECT_FOLDERS = new Set([
     "..",
 ]);
 
+const GENERIC_CONTEXT_FOLDERS = new Set([
+    "src",
+    "source",
+    "sources",
+    "include",
+    "inc",
+    "bin",
+    "obj",
+    "debug",
+    "release",
+    "main",
+    "code",
+    "codigo",
+    "código",
+    "projeto",
+    "project",
+    "projects",
+    "trabalho",
+    "trabalhos",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+]);
+
 const TIPO_PATTERNS = {
     prova: [
         /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|n[1-4](?:[._-]\d+)?|af|prova|avaliac[aã]o|simulado)(\b|$)/i,
@@ -238,6 +274,10 @@ const TECHNICAL_SIGLAS = new Set([
     "ATC",
     "BD",
     "LP",
+    "AC",
+    "CG",
+    "CN",
+    "GAA",
 ]);
 
 const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
@@ -281,6 +321,16 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     EDMAR: "Edmar",
     "BRUNO MESQUITA": "Bruno Mesquita",
     DIJALMA: "Dijalma",
+    VALBERTO: "Valberto",
+    ERNANI: "Ernani Leite",
+    "ERNANI LEITE": "Ernani Leite",
+    ALMIR: "Almir",
+    WELLINGTON: "Wellington",
+    CRISTIANE: "Cristiane",
+    ANDREIA: "Andréia Rodrigues",
+    "ANDREIA RODRIGUES": "Andréia Rodrigues",
+    "ANDRÉIA RODRIGUES": "Andréia Rodrigues",
+    "PAULO DIEGO": "Paulo Diego",
 };
 
 const GENERIC_TITLE_TOKENS = new Set([
@@ -445,8 +495,15 @@ function fixMojibake(value: unknown): string {
     ];
 
     let fixed = safeValue;
-    for (const [pattern, replacement] of replacements) {
-        fixed = fixed.replace(pattern, replacement);
+    for (let pass = 0; pass < 3; pass += 1) {
+        let next = fixed;
+        for (const [pattern, replacement] of replacements) {
+            next = next.replace(pattern, replacement);
+        }
+        if (next === fixed) {
+            break;
+        }
+        fixed = next;
     }
 
     return fixed;
@@ -535,6 +592,16 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
         return "";
     }
 
+    if (sigla === "EDA") {
+        return "Estrutura de Dados";
+    }
+
+    const normalizedPath = normalizeComparable(path).toUpperCase();
+
+    if (sigla === "ED" && /\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
+        return "Estrutura de Dados";
+    }
+
     const semesterNumber = getSemesterNumberFromPath(path);
     if (sigla === "ED") {
         if (semesterNumber === 1) {
@@ -545,11 +612,7 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
         }
     }
 
-    const normalizedPath = normalizeComparable(path).toUpperCase();
     if (sigla === "ED") {
-        if (/\bALISSON\b|\bALLYSON\b/.test(normalizedPath)) {
-            return "Estrutura de Dados";
-        }
         if (/\bJB\b|\bJOACIL+O\b/.test(normalizedPath)) {
             return "Eletrônica Digital";
         }
@@ -598,8 +661,12 @@ function getSubjectPart(path: unknown): string {
 
         const comparable = normalizeComparable(part);
         const sigla = normalizeSigla(part);
+        const isGenericContextFolder =
+            GENERIC_CONTEXT_FOLDERS.has(comparable) ||
+            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*$/i.test(comparable);
         const isIgnoredFolder =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
+            isGenericContextFolder ||
             /^s\d{1,2}$/i.test(part) ||
             /^n\d{1,2}$/i.test(part) ||
             /^\d+$/.test(comparable) ||
@@ -752,6 +819,13 @@ function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefin
 
     const disciplina = inferDisciplina(file);
     const semester = inferSemester(file);
+    const tipo = inferTipo(file);
+    const isGenericCaptureName = /^(?:img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
+    if (disciplina && tipo === "Prova" && isGenericCaptureName) {
+        const suffix = semester ? ` - ${semester}` : "";
+        return `Prova - ${disciplina}${suffix} (Imagem)`;
+    }
+
     const questionMatch =
         normalizedName.match(/\bquest(?:a|ã)o\s*(\d+)\b/i) ??
         normalizedName.match(/\b(\d+)\s*quest(?:a|ã)o\b/i) ??
@@ -813,10 +887,17 @@ function isTechnicalContext(file: RepoFile | null | undefined): boolean {
 
 function isNoiseFile(file: RepoFile | null | undefined): boolean {
     const normalizedPath = `/${normalizeComparable(normalizePath(file?.path))}/`;
+    const normalizedPathParts = normalizePath(file?.path)
+        .split("/")
+        .filter(Boolean)
+        .map((part) => normalizeComparable(part));
     const normalizedName = normalizeComparable(file?.name);
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
 
     if (NOISE_PATH_MARKERS.some((marker) => normalizedPath.includes(marker))) {
+        return true;
+    }
+    if (normalizedPathParts.some((part) => NOISE_FOLDER_PARTS.has(part))) {
         return true;
     }
     if (NOISE_FILE_NAMES.has(normalizedName)) {
@@ -961,11 +1042,31 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
         .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
         .replace(/[._\-]/g, " ")
+        .replace(/(?:^|\s)(?:c[^\s]*pia\s+de|c[^\s]*pia)\s*(?:\(?\s*\d+\s*\)?)?/gi, " ")
+        .replace(/\b(?:vers[aã]o\s*)?v\d+(?:\.\d+)?\b/gi, " ")
+        .replace(/\bfinal\b/gi, " ")
+        .replace(/\beditad[oa]\b/gi, " ")
         .replace(/\s*\(\s*(?:copia|copy)\s*\d*\s*\)\s*$/i, "")
         .replace(/\s+/g, " ")
         .trim();
 
+    const comparableCleanedName = normalizeComparable(cleanedName);
+    if (/^copia(?:\s+de)?\b/.test(comparableCleanedName)) {
+        cleanedName = cleanedName
+            .replace(/^\s*\S+\s+de\s+/i, "")
+            .replace(/^\s*\S+\s+/i, "")
+            .trim();
+    }
+
     if (tipo === "Prova") {
+        cleanedName = cleanedName
+            .replace(/^\s*(?:c[^\s]*pia\s+de\s*)+/i, "")
+            .replace(/^\s*(?:c[^\s]*pia\s*)+/i, "")
+            .replace(/\b(?:vers[aã]o\s*)?v\d+(?:\.\d+)?\b/gi, "")
+            .replace(/\b(?:editad[oa]|final)\b/gi, "")
+            .replace(/\s+/g, " ")
+            .trim();
+
         const numberedProvaMatch = cleanedName.match(/^\s*prova\s*[-_ ]?(\d+)\s*$/i);
         if (numberedProvaMatch?.[1]) {
             cleanedName = `Prova ${numberedProvaMatch[1]}`;
@@ -1007,6 +1108,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         }
         if (isImage && sequencePart && part === sequencePart && finalBaseTitle.length < 10) {
             const contextTitle = subject || subjectSigla || finalBaseTitle;
+            if (tipo === "Prova") {
+                return `Prova - ${contextTitle} (Parte ${sequencePart.padStart(2, "0")})`;
+            }
             return `${contextTitle} - Parte ${sequencePart.padStart(2, "0")}`;
         }
         if (finalBaseTitle) {
@@ -1018,6 +1122,19 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         cleanedName = normalizeText(nameWithoutExt);
     }
 
+    if (/^\d{4}\.[12]$/.test(semester)) {
+        const [, year, term] = semester.match(/^(\d{4})\.([12])$/) ?? [];
+        if (year && term) {
+            const semesterPattern = new RegExp(`\\b${year}\\s*[._\\-/]?\\s*${term}\\b`, "gi");
+            const compactPattern = new RegExp(`\\b${year}${term}\\b`, "gi");
+            cleanedName = cleanedName
+                .replace(semesterPattern, " ")
+                .replace(compactPattern, " ")
+                .replace(/\s{2,}/g, " ")
+                .trim();
+        }
+    }
+
     const ignoredFolderImageTitle = inferImageTitleFromIgnoredFolderContext(file, normalizedName);
     if (ignoredFolderImageTitle) {
         return ignoredFolderImageTitle;
@@ -1025,7 +1142,23 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
 
+    if (tipo === "Prova") {
+        const normalizedBackupLikeName = normalizeComparable(cleanedName);
+        if (/\b(?:copia|copy|editado|editada|v\d+(?:\.\d+)?)\b/.test(normalizedBackupLikeName)) {
+            cleanedName = "Prova";
+        }
+    }
+
     if (tipo === "Prova" && isImage) {
+        const isGenericCaptureName = /^(?:img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
+        if (isGenericCaptureName) {
+            const contextual = [subject && subject !== "Geral" ? subject : subjectSigla, semester].filter(Boolean).join(" - ");
+            if (contextual) {
+                return `Prova - ${contextual} (Imagem)`;
+            }
+            return "Prova (Imagem)";
+        }
+
         const genericImageTokens = new Set([
             "prova",
             "p",
@@ -1074,6 +1207,9 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     const normalizedCleanedName = normalizeComparable(cleanedName);
+    if (normalizedCleanedName && subject && normalizedCleanedName === normalizeComparable(subject)) {
+        return subject;
+    }
     const isGenericTitle =
         GENERIC_TITLE_TOKENS.has(normalizedCleanedName) ||
         cleanedName.length <= 2 ||
@@ -1214,6 +1350,9 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const { sigla, name } = getSiglaAndName(part);
         const hasLetterInSigla = /[A-Z]/.test(sigla);
         const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(part);
+        const isGenericContextFolder =
+            GENERIC_CONTEXT_FOLDERS.has(comparable) ||
+            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*$/i.test(comparable);
 
         if (isLikelyProfessorFolder(part)) {
             continue;
@@ -1241,6 +1380,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
 
         const isIgnored =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
+            isGenericContextFolder ||
             /^documentos(?:\b|\s*[-_])/i.test(comparable) ||
             /^[sn]\d{1,2}$/i.test(comparable) ||
             /^\d{4}/.test(comparable) ||
@@ -1446,6 +1586,21 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Revisão");
     }
 
-    const cleanedTags = Array.from(tags).filter((tag) => !/^\d+\s*[.)-]\s*/.test(normalizeText(tag)));
+    const protectedLongTags = new Set(
+        [resolvedSigla, disciplina, ...KNOWN_PROFESSORS]
+            .map((value) => normalizeComparable(value))
+            .filter(Boolean),
+    );
+
+    const cleanedTags = Array.from(tags).filter((tag) => {
+        if (!tag) {
+            return false;
+        }
+        const normalizedTag = normalizeComparable(tag);
+        if (tag.length > 25 && !protectedLongTags.has(normalizedTag)) {
+            return false;
+        }
+        return !/^\d+\s*[.)-]\s*/.test(normalizeText(tag));
+    });
     return dedupeTagsByContent(cleanedTags, [resolvedSigla]);
 }
