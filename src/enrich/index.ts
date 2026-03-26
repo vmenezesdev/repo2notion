@@ -22,6 +22,9 @@ const NOISE_PATH_MARKERS = [
     "/src/images/",
     "/conteudo anterior/",
     "/conteúdo anterior/",
+    "/incremental_db/",
+    "/output_files/",
+    "/db_info/",
 ];
 
 const NOISE_FOLDER_PARTS = new Set([
@@ -84,6 +87,17 @@ const NOISE_EXTENSIONS = new Set([
     "qpf",
     "qws",
     "sft",
+    "done",
+    "rpt",
+    "summary",
+    "jdi",
+    "pin",
+    "sld",
+    "workspace",
+    "depend",
+    "layout",
+    "cbp",
+    "msi",
     "db_info",
     "db info",
 ]);
@@ -684,13 +698,71 @@ function getSemesterNumberFromPath(path: unknown): number | null {
     return Number.isFinite(semesterNumber) ? semesterNumber : null;
 }
 
+function inferPathLevelToken(path: unknown, context?: string): string {
+    const normalizedPath = normalizeComparable(path);
+    if (!normalizedPath) {
+        return "";
+    }
+
+    if (context) {
+        const escapedContext = escapeRegExp(normalizeComparable(context));
+        const contextualMatch = normalizedPath.match(new RegExp(`\\b${escapedContext}\\s*(?:[-–—_.]|\\s)*(i{1,3}|[123])\\b`, "i"));
+        if (contextualMatch?.[1]) {
+            return normalizeComparable(contextualMatch[1]);
+        }
+    }
+
+    const semesterLevelMatch = normalizedPath.match(/(?:^|\/)s0*([1-3])(?:\/|$)/i);
+    if (semesterLevelMatch?.[1]) {
+        return semesterLevelMatch[1];
+    }
+
+    return "";
+}
+
+function levelFromToken(token: string): string {
+    if (token === "1" || token === "i") {
+        return "I";
+    }
+    if (token === "2" || token === "ii") {
+        return "II";
+    }
+    if (token === "3" || token === "iii") {
+        return "III";
+    }
+    return "";
+}
+
+function appendDisciplineLevel(baseDisciplina: string, path: unknown): string {
+    const normalizedBase = normalizeComparable(baseDisciplina);
+    if (!normalizedBase || /\b(?:i|ii|iii|[123])$/.test(normalizedBase)) {
+        return baseDisciplina;
+    }
+
+    const shouldSpecialize =
+        normalizedBase === "calculo" ||
+        normalizedBase === "fisica" ||
+        normalizedBase === "quimica";
+    if (!shouldSpecialize) {
+        return baseDisciplina;
+    }
+
+    const token = inferPathLevelToken(path, normalizedBase);
+    const level = levelFromToken(token);
+    if (!level) {
+        return baseDisciplina;
+    }
+
+    return `${baseDisciplina} ${level}`;
+}
+
 function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     if (!sigla) {
         return "";
     }
 
     if (sigla === "EDA") {
-        return "Estrutura de Dados";
+        return appendDisciplineLevel("Estrutura de Dados", path);
     }
 
     const normalizedPath = normalizeComparable(path).toUpperCase();
@@ -734,36 +806,15 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     if (semesterNumber !== null) {
         const semesterMapped = DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla]?.[semesterNumber];
         if (semesterMapped) {
-            return semesterMapped;
+            return appendDisciplineLevel(semesterMapped, path);
         }
     }
 
-    return DISCIPLINA_BY_SIGLA[sigla] ?? "";
+    return appendDisciplineLevel(DISCIPLINA_BY_SIGLA[sigla] ?? "", path);
 }
 
 function inferCalculoLevelFromPath(path: unknown): string {
-    const normalizedPath = normalizeComparable(path);
-    if (!normalizedPath) {
-        return "";
-    }
-
-    const levelMatch = normalizedPath.match(/\bcalculo\s*(?:[-–—_.]|\s)*(i{1,3}|[123])\b/i);
-    if (!levelMatch?.[1]) {
-        return "";
-    }
-
-    const token = normalizeComparable(levelMatch[1]);
-    if (token === "1" || token === "i") {
-        return "I";
-    }
-    if (token === "2" || token === "ii") {
-        return "II";
-    }
-    if (token === "3" || token === "iii") {
-        return "III";
-    }
-
-    return "";
+    return levelFromToken(inferPathLevelToken(path, "calculo"));
 }
 
 function getSemesterFromText(value: unknown): string {
@@ -1369,6 +1420,14 @@ function shouldUseSequentialImagePart(nameWithoutExt: string, sequencePart: stri
     return true;
 }
 
+function normalizePartLabel(part: string): string {
+    const normalized = String(Number(part));
+    if (/^\d+$/.test(normalized)) {
+        return normalized.padStart(2, "0");
+    }
+    return part;
+}
+
 function stripSubjectFromGenericTitle(title: string, subject: string): string {
     if (!title || !subject) {
         return title;
@@ -1673,7 +1732,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             return `${contextTitle} - Parte ${safeSequencePart.padStart(2, "0")}`;
         }
         if (finalBaseTitle) {
-            return `${finalBaseTitle} (Parte ${part})`;
+            return `${finalBaseTitle} (Parte ${normalizePartLabel(part)})`;
         }
     }
 
@@ -1792,7 +1851,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         const base = gradeMatch ? `Prova N${gradeMatch[1]}` : provaNumberMatch?.[1] ? `Prova ${provaNumberMatch[1]}` : "Prova";
         const baseWithRetake = retakeLabel ? `${base} (${retakeLabel})` : base;
         if (part) {
-            return `${baseWithRetake} (Parte ${part})`;
+            return `${baseWithRetake} (Parte ${normalizePartLabel(part)})`;
         }
         if (base === "Prova") {
             const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
@@ -2016,6 +2075,32 @@ function isGenericTitleLike(normalizedTitle: string): boolean {
     );
 }
 
+function inferRonaldoDisciplineByContext(file: RepoFile | null | undefined): string {
+    const context = `${normalizeComparable(file?.path)} ${normalizeComparable(file?.name)}`;
+    if (!context.includes("ronaldo")) {
+        return "";
+    }
+
+    if (/\b(sort|sorting|ordenacao|ordena[cç][aã]o|bolha|busca|hash|tree|arvore|arvores|merge|quick|heap|selection|insertion)\b/i.test(context)) {
+        return "Pesquisa e Ordenação";
+    }
+
+    if (/\b(factory|strategy|observer|adapter|decorator|singleton|builder|prototype|command|pattern|padrao|padroes)\b/i.test(context)) {
+        return "Padrões de Projeto";
+    }
+
+    return "";
+}
+
+function withDisciplineSpecialization(disciplina: string, file: RepoFile | null | undefined): string {
+    const ronaldoSpecialized = inferRonaldoDisciplineByContext(file);
+    if (ronaldoSpecialized) {
+        return ronaldoSpecialized;
+    }
+
+    return appendDisciplineLevel(disciplina, file?.path);
+}
+
 export function inferDisciplina(file: RepoFile | null | undefined): string {
     const path = normalizePath(file?.path);
     const parts = path.split("/").filter(Boolean);
@@ -2067,17 +2152,17 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
                         resolvedByContext &&
                         normalizeComparable(resolvedByContext).includes(normalizeComparable(normalizedName))
                     ) {
-                        return resolvedByContext;
+                        return withDisciplineSpecialization(resolvedByContext, file);
                     }
-                    return normalizedName;
+                    return withDisciplineSpecialization(normalizedName, file);
                 }
                 if (!resolvedByContext) {
-                    return normalizedName;
+                    return withDisciplineSpecialization(normalizedName, file);
                 }
-                return resolvedByContext;
+                return withDisciplineSpecialization(resolvedByContext, file);
             }
             if (resolvedByContext) {
-                return resolvedByContext;
+                return withDisciplineSpecialization(resolvedByContext, file);
             }
         }
 
@@ -2094,25 +2179,25 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         }
 
         if (name) {
-            return fixMojibake(name).trim();
+            return withDisciplineSpecialization(fixMojibake(name).trim(), file);
         }
 
-        return part;
+        return withDisciplineSpecialization(part, file);
     }
 
     const inferredFromFileName = inferDisciplinaFromFileName(file?.name);
     if (inferredFromFileName) {
-        return inferredFromFileName;
+        return withDisciplineSpecialization(inferredFromFileName, file);
     }
 
     const inferredFromRepoRoot = inferDisciplinaFromRepositoryRoot(path);
     if (inferredFromRepoRoot) {
-        return inferredFromRepoRoot;
+        return withDisciplineSpecialization(inferredFromRepoRoot, file);
     }
 
     const inferredFromProfessorContext = inferDisciplinaFromProfessorContext(file);
     if (inferredFromProfessorContext) {
-        return inferredFromProfessorContext;
+        return withDisciplineSpecialization(inferredFromProfessorContext, file);
     }
 
     const professor = inferProfessorFromPath(path);
@@ -2159,20 +2244,19 @@ function inferDisciplinaFromProfessorContext(file: RepoFile | null | undefined):
         /\bheap\s*sort\b/i,
         /\b(ordena[cç][aã]o|ordenacao|sort|sorting|busca|search|hash|arvore|tree)\b/i,
     ];
-    const pooHints = [
-        /\b(oop|poo|orientad[ao] a objetos|objeto|classe|encapsul|heranc|polimorf|uml)\b/i,
-        /\b(java|csharp|c#)\b/i,
+    const designPatternHints = [
+        /\b(factory|strategy|observer|adapter|decorator|singleton|builder|prototype|command|pattern|padrao|padroes)\b/i,
     ];
 
     const hasPoHint = poHints.some((pattern) => pattern.test(context));
-    const hasPooHint = pooHints.some((pattern) => pattern.test(context));
+    const hasPatternHint = designPatternHints.some((pattern) => pattern.test(context));
 
-    if (hasPoHint && !hasPooHint) {
+    if (hasPoHint && !hasPatternHint) {
         return "Pesquisa e Ordenação";
     }
 
-    if (hasPooHint && !hasPoHint) {
-        return "Programação Orientada a Objetos";
+    if (hasPatternHint && !hasPoHint) {
+        return "Padrões de Projeto";
     }
 
     if (["ipynb", "af", "idl"].includes(extension) && hasPoHint) {
@@ -2357,10 +2441,10 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     }
 
     if (upperPath.includes("N1") || /\bP1\b/.test(fileName.toUpperCase())) {
-        tags.add("N1");
+        tags.add("AV1");
     }
     if (upperPath.includes("N2") || /\bP2\b/.test(fileName.toUpperCase())) {
-        tags.add("N2");
+        tags.add("AV2");
     }
 
     if (/GABARITO/i.test(fileName) || /GABARITO/i.test(normalizedPath)) {

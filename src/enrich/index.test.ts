@@ -95,7 +95,7 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "N2 prova 1.jpeg",
         "jpeg",
     );
-    assert.equal(normalizeTitle(provaImagem), "Prova N2 (Parte 1)");
+    assert.equal(normalizeTitle(provaImagem), "Prova N2 (Parte 01)");
 });
 
 test("nao interpreta timestamp como parte", () => {
@@ -104,7 +104,7 @@ test("nao interpreta timestamp como parte", () => {
         "P_20170530_141545.jpg",
         "jpg",
     );
-    assert.equal(normalizeTitle(file), "Cálculo - Prova (2017.1)");
+    assert.equal(normalizeTitle(file), "Calculo I - Prova (2017.1)");
 });
 
 test("nao interpreta sufixo de timestamp em nome de camera como parte", () => {
@@ -199,7 +199,7 @@ test("prioriza tipo prova sobre documentacao", () => {
 test("prioriza lista explicita mesmo em pasta de avaliacao", () => {
     const tipo = inferTipo(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg"));
     assert.equal(tipo, "Lista de Exercícios");
-    assert.equal(normalizeTitle(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg")), "Lista 1 (Parte 2)");
+    assert.equal(normalizeTitle(makeFile("/S01/CA - Calculo I/2014.2 - Fernando Macedo/N1/Lista 1 - pag 2.jpg", "Lista 1 - pag 2.jpg", "jpg")), "Lista 1 (Parte 02)");
 });
 
 test("nao interpreta P1 como parte do titulo", () => {
@@ -623,11 +623,15 @@ test("filtra extensoes adicionais de ruido", () => {
     const exeFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/Daedalus.exe", "Daedalus.exe", "exe");
     const jarFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/Mars_4_1.jar", "Mars_4_1.jar", "jar");
     const infoFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/ZbThumbnail.info", "ZbThumbnail.info", "info");
+    const rptFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/relatorio.rpt", "relatorio.rpt", "rpt");
+    const summaryFile = makeFile("/S01/CA - Calculo I/2024.1 - PH/build.summary", "build.summary", "summary");
 
     assert.equal(inferMetadata(logFile), null);
     assert.equal(inferMetadata(exeFile), null);
     assert.equal(inferMetadata(jarFile), null);
     assert.equal(inferMetadata(infoFile), null);
+    assert.equal(inferMetadata(rptFile), null);
+    assert.equal(inferMetadata(summaryFile), null);
 });
 
 test("preserva ano no inicio de nome de prova", () => {
@@ -805,6 +809,11 @@ test("diferencia calculo por nivel no caminho", () => {
     assert.equal(inferDisciplina(file), "Calculo II");
 });
 
+test("especializa fisica por semestre da grade", () => {
+    const file = makeFile("/S02/FE - Fisica/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Física II");
+});
+
 test("prioriza resolucao para arquivos de ferramentas", () => {
     const file = makeFile("/S01/CA - Calculo/2024.1 - PH/gabarito derivative Wolfram Alpha.pdf", "gabarito derivative Wolfram Alpha.pdf", "pdf");
     assert.equal(normalizeTitle(file), "Resolução - Derivative Wolfram Alpha");
@@ -823,6 +832,11 @@ test("trata readme sem extensao como ruido", () => {
 test("infere disciplina em pasta de professor por contexto tecnico", () => {
     const file = makeFile("/Cadeiras com o Ronaldo/bubblesort.ipynb", "bubblesort.ipynb", "ipynb");
     assert.equal(inferDisciplina(file), "Pesquisa e Ordenação");
+});
+
+test("desambigua ronaldo para padroes de projeto", () => {
+    const file = makeFile("/Cadeiras com o Ronaldo/factory-pattern-observer.pdf", "factory-pattern-observer.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Padrões de Projeto");
 });
 
 test("filtra imagens de documentacao em src/images", () => {
