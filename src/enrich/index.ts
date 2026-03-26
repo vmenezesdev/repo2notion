@@ -510,7 +510,8 @@ const MOJIBAKE_REPLACEMENTS: Array<[RegExp, string]> = [
     [/Ã§Ã£/g, "çã"],
     [/Ã£o/g, "ão"],
     [/Ã¡/g, "á"],
-    [/Ã /g, "à"],
+    [/Ã\u00A0/g, "à"],
+    [/Ã /g, "à"],
     [/Ã¢/g, "â"],
     [/Ã£/g, "ã"],
     [/Ã¤/g, "ä"],
@@ -562,7 +563,6 @@ const MOJIBAKE_REPLACEMENTS: Array<[RegExp, string]> = [
     [/Ã\?/g, "ó"],
     [/Ã\(/g, "ç"],
     [/Ã\$/g, "ú"],
-    [/Ã(?=[\s])/g, "ã"],
     [/Âº/g, "º"],
     [/Âª/g, "ª"],
     [/Â°/g, "°"],
@@ -847,10 +847,7 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
             return "Eletrônica Digital";
         }
         // Check professor associations (most reliable for ED ambiguity)
-        if (/\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
-            return "Estrutura de Dados";
-        }
-        if (/\bJB\b|\bJOACIL+O\b/.test(normalizedPath)) {
+        if (/\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b|\bJOACIL+O\b/.test(normalizedPath)) {
             return "Eletrônica Digital";
         }
         // Use semester as LAST resort, not as primary heuristic
@@ -1063,12 +1060,14 @@ function getSubjectPart(path: unknown): string {
 
         const comparable = normalizeComparable(part);
         const sigla = normalizeSigla(part);
+        const isTopicLikeFolder = /^(?:aulas?|exerc(?:icio|icios)|exerc[íi]cio|exerc[íi]cios|provas?|projetos?|trabalhos?|sockets|rmi|corba|threads|arduino)\b/.test(comparable);
         const isGenericContextFolder =
             GENERIC_CONTEXT_FOLDERS.has(comparable) ||
             /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*(?:\s*[-–—]\s*.+)?$/i.test(comparable);
         const isIgnoredFolder =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
             TOPIC_SUBJECT_FOLDERS.has(comparable) ||
+            isTopicLikeFolder ||
             isGenericContextFolder ||
             /^s\d{1,2}$/i.test(part) ||
             /^n\d{1,2}$/i.test(part) ||
@@ -1265,7 +1264,27 @@ function getPathFolderParts(path: unknown): string[] {
 function isIgnoredContainerFolder(path: unknown): boolean {
     const folderParts = getPathFolderParts(path);
     const parent = folderParts[folderParts.length - 1] ?? "";
-    return IGNORED_SUBJECT_FOLDERS.has(normalizeComparable(parent));
+    const normalizedParent = normalizeComparable(parent);
+
+    if (IGNORED_SUBJECT_FOLDERS.has(normalizedParent)) {
+        return true;
+    }
+
+    return /^(?:aulas?|exerc(?:icio|icios)|exerc[íi]cio|exerc[íi]cios)\b/i.test(normalizedParent);
+}
+
+function getContainerContextLabel(path: unknown): string {
+    const folderParts = getPathFolderParts(path);
+    const parent = normalizeText(folderParts[folderParts.length - 1] ?? "");
+    if (!parent) {
+        return "";
+    }
+
+    if (/^(?:aulas?|exerc[íi]cio|exerc[íi]cios)\b/i.test(normalizeComparable(parent))) {
+        return parent;
+    }
+
+    return "";
 }
 
 function inferGenericTitleTypeLabel(tipo: string): string {
@@ -1284,6 +1303,7 @@ function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefin
     const disciplina = inferDisciplina(file);
     const semester = inferSemester(file);
     const tipo = inferTipo(file);
+    const containerContextLabel = getContainerContextLabel(file?.path);
     const isGenericCaptureName = /^(?:img|dsc|whatsapp\s+image|snapshot|photo|foto|captura|scan|imagem?)\b/.test(normalizedName);
     if (disciplina && tipo === "Prova" && isGenericCaptureName) {
         const suffix = semester ? ` - ${semester}` : "";
@@ -1300,6 +1320,9 @@ function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefin
     }
 
     if (disciplina && isGenericCaptureName) {
+        if (containerContextLabel) {
+            return `${disciplina} - ${containerContextLabel} - Imagem`;
+        }
         const suffix = semester ? ` (${semester})` : "";
         return `${disciplina} - Imagem${suffix}`;
     }
@@ -1461,8 +1484,7 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
     }
 
     const hasSrcImagesTrail = normalizedPathParts.some((part, index) => part === "src" && normalizedPathParts[index + 1] === "images");
-    const hasSemesterFolder = normalizedPathParts.some((part) => /^s\d{1,2}$/i.test(part));
-    if (hasSrcImagesTrail && !hasSemesterFolder && inferDisciplina(file) === "Geral") {
+    if (hasSrcImagesTrail) {
         return true;
     }
 
@@ -1967,6 +1989,14 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
                 .replace(/\s{2,}/g, " ")
                 .trim();
         }
+    } else if (/^\d{4}$/.test(semester)) {
+        const year = semester;
+        const yearPattern = new RegExp(`\\b${year}\\b`, "gi");
+        cleanedName = cleanedName
+            .replace(yearPattern, " ")
+            .replace(/\(\s*\)/g, " ")
+            .replace(/\s{2,}/g, " ")
+            .trim();
     }
 
     const ignoredFolderImageTitle = inferImageTitleFromIgnoredFolderContext(file, normalizedName);
@@ -2047,9 +2077,11 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         }
         if (base === "Prova") {
             const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
-            const contextualParts = [displaySubject, "Prova", semester].filter(Boolean);
-            if (contextualParts.length > 1) {
-                return contextualParts.join(" - ");
+            if (displaySubject) {
+                if (semester) {
+                    return `${displaySubject} - Prova (${semester})`;
+                }
+                return `${displaySubject} - Prova`;
             }
         }
         return baseWithRetake;
@@ -2323,9 +2355,10 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const hasLetterInSigla = /[A-Z]/.test(sigla);
         const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*[-–—_]\s*.+$/.test(part);
         const hasGenericPrefix = /^(?:trabalho|projeto|project|atividade|lista|lab|aula)s?\b/i.test(comparable);
+        const isTopicLikeFolder = /^(?:aulas?|exerc(?:icio|icios)|exerc[íi]cio|exerc[íi]cios|provas?|projetos?|trabalhos?|sockets|rmi|corba|threads|arduino)\b/.test(comparable);
         const isGenericContextFolder =
             GENERIC_CONTEXT_FOLDERS.has(comparable) ||
-            /^(?:trabalho|projeto|project|atividade|lista|lab)\s*\d*(?:\s*[-–—]\s*.+)?$/i.test(comparable);
+            /^(?:trabalho|projeto|project|atividade|lista|lab|aula|exercicio|exercício)\s*\d*(?:\s*[-–—]\s*.+)?$/i.test(comparable);
 
         if (isLikelyProfessorFolder(part)) {
             continue;
@@ -2376,6 +2409,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const isIgnored =
             IGNORED_SUBJECT_FOLDERS.has(comparable) ||
             TOPIC_SUBJECT_FOLDERS.has(comparable) ||
+            isTopicLikeFolder ||
             isGenericContextFolder ||
             /^documentos(?:\b|\s*[-_])/i.test(comparable) ||
             /^[sn]\d{1,2}$/i.test(comparable) ||

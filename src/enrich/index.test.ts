@@ -890,3 +890,22 @@ test("filtra imagens de documentacao em src/images", () => {
     );
     assert.equal(inferMetadata(file), null);
 });
+
+test("nao confunde mojibake de maiuscula acentuada com a-grave", () => {
+    const file = makeFile("/S03/ATC - Aspectos Teoricos da Computacao/2024.1 - PH/Ãrvore.pdf", "Ãrvore.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "Árvore");
+});
+
+test("usa contexto de aula para imagem generica em pasta topic", () => {
+    const file = makeFile(
+        "../provas//S05/SL - Sistemas Lineares/2016.2 - PH/Aula 01-11/IMG_20161101_173803469.jpg",
+        "IMG_20161101_173803469.jpg",
+        "jpg",
+    );
+    assert.equal(normalizeTitle(file), "Sistemas Lineares - Aula 01-11 - Imagem");
+});
+
+test("remove ano isolado do titulo quando semestre e YYYY", () => {
+    const file = makeFile("/BEPID-Apple/2014/BEPID 2014(Turma 2015).pdf", "BEPID 2014(Turma 2015).pdf", "pdf");
+    assert.equal(normalizeTitle(file), "BEPID (Turma 2015)");
+});
