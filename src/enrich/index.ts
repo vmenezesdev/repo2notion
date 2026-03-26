@@ -130,7 +130,7 @@ const SEMESTER_REGEXES = [
     /\b((?:19|20)\d{2})([12])\b/,
 ];
 
-const YEAR_REGEX = /\b((?:19|20)\d{2})\b/;
+const YEAR_REGEX = /(?:^|[^A-Za-z0-9])((?:19|20)\d{2})(?!\d)(?:$|[^A-Za-z])/;
 
 const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     AC: "Arquitetura de Computadores",
@@ -500,6 +500,73 @@ function safeString(value: unknown): string {
     return typeof value === "string" ? value.normalize("NFC") : "";
 }
 
+const MOJIBAKE_REPLACEMENTS: Array<[RegExp, string]> = [
+    [/Ã_cios/g, "ícios"],
+    [/Ã_cio/g, "ício"],
+    [/Ã_cias/g, "ícias"],
+    [/Ã_cia/g, "ícia"],
+    [/Ã§Ã£/g, "çã"],
+    [/Ã£o/g, "ão"],
+    [/Ã¡/g, "á"],
+    [/Ã /g, "à"],
+    [/Ã¢/g, "â"],
+    [/Ã£/g, "ã"],
+    [/Ã¤/g, "ä"],
+    [/Ã©/g, "é"],
+    [/Ã¨/g, "è"],
+    [/Ãª/g, "ê"],
+    [/Ã«/g, "ë"],
+    [/Ã­/g, "í"],
+    [/Ã¬/g, "ì"],
+    [/Ã®/g, "î"],
+    [/Ã¯/g, "ï"],
+    [/Ã³/g, "ó"],
+    [/Ã²/g, "ò"],
+    [/Ã´/g, "ô"],
+    [/Ãµ/g, "õ"],
+    [/Ã¶/g, "ö"],
+    [/Ãº/g, "ú"],
+    [/Ã¹/g, "ù"],
+    [/Ã»/g, "û"],
+    [/Ã¼/g, "ü"],
+    [/Ã§/g, "ç"],
+    [/Ã/g, "Á"],
+    [/Ã€/g, "À"],
+    [/Ã‚/g, "Â"],
+    [/Ãƒ/g, "Ã"],
+    [/Ã„/g, "Ä"],
+    [/Ã‰/g, "É"],
+    [/Ãˆ/g, "È"],
+    [/ÃŠ/g, "Ê"],
+    [/Ã‹/g, "Ë"],
+    [/Ã/g, "Í"],
+    [/ÃŒ/g, "Ì"],
+    [/ÃŽ/g, "Î"],
+    [/Ã/g, "Ï"],
+    [/Ã“/g, "Ó"],
+    [/Ã’/g, "Ò"],
+    [/Ã”/g, "Ô"],
+    [/Ã•/g, "Õ"],
+    [/Ã–/g, "Ö"],
+    [/Ãš/g, "Ú"],
+    [/Ã™/g, "Ù"],
+    [/Ã›/g, "Û"],
+    [/Ãœ/g, "Ü"],
+    [/Ã‡/g, "Ç"],
+    [/Ã_n/g, "ún"],
+    [/Ã_o/g, "ão"],
+    [/Ã_/g, "í"],
+    [/Ã\^/g, "ê"],
+    [/Ã\?/g, "ó"],
+    [/Ã\(/g, "ç"],
+    [/Ã\$/g, "ú"],
+    [/Ã(?=[\s])/g, "ã"],
+    [/Âº/g, "º"],
+    [/Âª/g, "ª"],
+    [/Â°/g, "°"],
+    [/Â(?=\s|$|[.,;:!?\)\]\}])/g, ""],
+];
+
 function normalizePath(path: unknown): string {
     return safeString(path).replace(/\\/g, "/").replace(/\/+/g, "/");
 }
@@ -521,77 +588,11 @@ function fixMojibake(value: unknown): string {
         return safeValue;
     }
 
-    const replacements: Array<[RegExp, string]> = [
-        [/Ã_cios/g, "ícios"],
-        [/Ã_cio/g, "ício"],
-        [/Ã_cias/g, "ícias"],
-        [/Ã_cia/g, "ícia"],
-        [/Ã§Ã£/g, "çã"],
-        [/Ã£o/g, "ão"],
-        [/Ã¡/g, "á"],
-        [/Ã /g, "à"],
-        [/Ã¢/g, "â"],
-        [/Ã£/g, "ã"],
-        [/Ã¤/g, "ä"],
-        [/Ã©/g, "é"],
-        [/Ã¨/g, "è"],
-        [/Ãª/g, "ê"],
-        [/Ã«/g, "ë"],
-        [/Ã­/g, "í"],
-        [/Ã¬/g, "ì"],
-        [/Ã®/g, "î"],
-        [/Ã¯/g, "ï"],
-        [/Ã³/g, "ó"],
-        [/Ã²/g, "ò"],
-        [/Ã´/g, "ô"],
-        [/Ãµ/g, "õ"],
-        [/Ã¶/g, "ö"],
-        [/Ãº/g, "ú"],
-        [/Ã¹/g, "ù"],
-        [/Ã»/g, "û"],
-        [/Ã¼/g, "ü"],
-        [/Ã§/g, "ç"],
-        [/Ã/g, "Á"],
-        [/Ã€/g, "À"],
-        [/Ã‚/g, "Â"],
-        [/Ãƒ/g, "Ã"],
-        [/Ã„/g, "Ä"],
-        [/Ã‰/g, "É"],
-        [/Ãˆ/g, "È"],
-        [/ÃŠ/g, "Ê"],
-        [/Ã‹/g, "Ë"],
-        [/Ã/g, "Í"],
-        [/ÃŒ/g, "Ì"],
-        [/ÃŽ/g, "Î"],
-        [/Ã/g, "Ï"],
-        [/Ã“/g, "Ó"],
-        [/Ã’/g, "Ò"],
-        [/Ã”/g, "Ô"],
-        [/Ã•/g, "Õ"],
-        [/Ã–/g, "Ö"],
-        [/Ãš/g, "Ú"],
-        [/Ã™/g, "Ù"],
-        [/Ã›/g, "Û"],
-        [/Ãœ/g, "Ü"],
-        [/Ã‡/g, "Ç"],
-        [/Ã_n/g, "ún"],
-        [/Ã_o/g, "ão"],
-        [/Ã_/g, "í"],
-        [/Ã\^/g, "ê"],
-        [/Ã\?/g, "ó"],
-        [/Ã\(/g, "ç"],
-        [/Ã\$/g, "ú"],
-        [/Ã(?=[\s])/g, "ã"],
-        [/Âº/g, "º"],
-        [/Âª/g, "ª"],
-        [/Â°/g, "°"],
-        [/Â(?=\s|$|[.,;:!?\)\]\}])/g, ""],
-    ];
-
     let fixed = safeValue;
-    for (let pass = 0; pass < 3; pass += 1) {
+    const maxPasses = safeValue.length > 4000 ? 1 : 3;
+    for (let pass = 0; pass < maxPasses; pass += 1) {
         let next = fixed;
-        for (const [pattern, replacement] of replacements) {
+        for (const [pattern, replacement] of MOJIBAKE_REPLACEMENTS) {
             next = next.replace(pattern, replacement);
         }
         if (next === fixed) {
@@ -613,7 +614,7 @@ function normalizeText(value: unknown): string {
 
 function splitJoinedTitleTokens(value: string): string {
     return value
-        .replace(/([a-zà-ÿ])([A-ZÀ-Ý])/g, "$1 $2")
+    .replace(/([a-zà-ÿ]{2,})([A-ZÀ-Ý][a-zà-ÿ])/g, "$1 $2")
         .replace(/([A-ZÀ-Ý])([A-ZÀ-Ý][a-zà-ÿ])/g, "$1 $2")
         .replace(/\blistade\b/gi, "lista de")
         .replace(/\s+/g, " ")
@@ -645,7 +646,23 @@ function isLikelySigla(sigla: string): boolean {
         return true;
     }
 
-    return sigla.length <= 6 && /^[A-Z0-9]+$/.test(sigla);
+    if (DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla]) {
+        return true;
+    }
+
+    if (!/^[A-Z0-9]+$/.test(sigla)) {
+        return false;
+    }
+
+    if (sigla.length > 5) {
+        return false;
+    }
+
+    if (/^[A-Z]{4,5}$/.test(sigla)) {
+        return false;
+    }
+
+    return true;
 }
 
 function hasKnownProfessorAlias(value: unknown): boolean {
@@ -767,6 +784,7 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     }
 
     const normalizedPath = normalizeComparable(path).toUpperCase();
+    const semesterNumber = getSemesterNumberFromPath(path);
 
     if (sigla === "CA" || sigla === "CALC") {
         const calculoLevel = inferCalculoLevelFromPath(path);
@@ -776,24 +794,21 @@ function resolveDisciplinaBySigla(sigla: string, path?: unknown): string {
     }
 
     if (sigla === "ED") {
+        if (semesterNumber === 1 || semesterNumber === 2) {
+            return "Eletrônica Digital";
+        }
+        if (semesterNumber === 3) {
+            return "Estrutura de Dados";
+        }
+
         if (/\bESTRUTURA\b|\bDADOS\b/.test(normalizedPath)) {
             return "Estrutura de Dados";
         }
         if (/\bELETRONICA\b|\bDIGITAL\b/.test(normalizedPath)) {
             return "Eletrônica Digital";
         }
-    }
 
-    if (sigla === "ED" && /\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
-        return "Estrutura de Dados";
-    }
-
-    const semesterNumber = getSemesterNumberFromPath(path);
-    if (sigla === "ED") {
-        if (semesterNumber === 1) {
-            return "Eletrônica Digital";
-        }
-        if (semesterNumber === 3) {
+        if (/\bALISSON\b|\bALLYSON\b|\bERNANI\b|\bREBECA\b/.test(normalizedPath)) {
             return "Estrutura de Dados";
         }
     }
@@ -1047,7 +1062,8 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     const spacedSiglaMatch = normalizedSubject.match(/^\s*([A-Z]{2,10})\s+(.+)$/);
     if (spacedSiglaMatch) {
         const sigla = normalizeSigla(spacedSiglaMatch[1]);
-        if (DISCIPLINA_BY_SIGLA[sigla] || isLikelySigla(sigla)) {
+        const looksLikeTeacherName = /^[A-Z]{6,10}$/.test(spacedSiglaMatch[1]) && !/\d/.test(spacedSiglaMatch[1]);
+        if (!looksLikeTeacherName && (DISCIPLINA_BY_SIGLA[sigla] || DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla] || isLikelySigla(sigla))) {
             return {
                 sigla,
                 name: spacedSiglaMatch[2].trim(),
@@ -1115,6 +1131,12 @@ function normalizeProfessorName(candidate: string): string {
 
     for (const professor of KNOWN_PROFESSORS) {
         const comparableProfessor = normalizeComparable(professor).toUpperCase();
+        if (comparableCandidate[0] && comparableProfessor[0] && comparableCandidate[0] !== comparableProfessor[0]) {
+            continue;
+        }
+        if (Math.abs(comparableCandidate.length - comparableProfessor.length) > 4) {
+            continue;
+        }
         const distance = levenshteinDistance(comparableCandidate, comparableProfessor);
         if (distance < bestDistance) {
             bestDistance = distance;
@@ -1126,7 +1148,13 @@ function normalizeProfessorName(candidate: string): string {
         return normalizedCandidate.toUpperCase();
     }
 
-    const threshold = Math.max(1, Math.floor(bestMatch.length * 0.2));
+    const bestLength = normalizeComparable(bestMatch).length;
+    const threshold =
+        bestLength <= 5
+            ? 1
+            : bestLength <= 8
+                ? 2
+                : Math.max(2, Math.min(4, Math.floor(bestLength * 0.25)));
     return bestDistance <= threshold ? bestMatch : normalizedCandidate.toUpperCase();
 }
 
@@ -1146,7 +1174,10 @@ function inferProfessorFromPath(path: unknown): string {
 function getSubjectSigla(file: RepoFile | null | undefined): string {
     const subjectPart = getSubjectPart(normalizePath(file?.path));
     const { sigla } = getSiglaAndName(subjectPart);
-    return sigla;
+    if (DISCIPLINA_BY_SIGLA[sigla] || DISCIPLINA_BY_SIGLA_AND_SEMESTER[sigla] || isLikelySigla(sigla)) {
+        return sigla;
+    }
+    return "";
 }
 
 function getPathFolderParts(path: unknown): string[] {
@@ -1320,7 +1351,8 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
     }
 
     const hasSrcImagesTrail = normalizedPathParts.some((part, index) => part === "src" && normalizedPathParts[index + 1] === "images");
-    if (hasSrcImagesTrail) {
+    const hasSemesterFolder = normalizedPathParts.some((part) => /^s\d{1,2}$/i.test(part));
+    if (hasSrcImagesTrail && !hasSemesterFolder && inferDisciplina(file) === "Geral") {
         return true;
     }
 
@@ -1528,6 +1560,7 @@ export function inferMetadata(
 
     const extension = normalizeComparable(normalizedFile.extension).replace(/^\./, "");
     const tipo = inferTipo(normalizedFile);
+    const disciplina = inferDisciplina(normalizedFile);
     const shouldFilterCodeFiles = options?.filterCodeFiles ?? true;
     if (shouldFilterCodeFiles && COMPILED_ARTIFACT_EXTENSIONS.has(extension)) {
         const shouldKeepCompiledByContext = HARDWARE_EXTENSIONS.has(extension) && ["Prova", "Trabalho/Projeto"].includes(tipo);
@@ -1541,8 +1574,15 @@ export function inferMetadata(
     const hasProjetoOuTrabalhoHint =
         /\b(?:projeto|project|trabalho|atividade|lab(?:orat[oó]rio)?)\b/.test(normalizedPath) ||
         /\b(?:projeto|project|trabalho|atividade|lab(?:orat[oó]rio)?)\b/.test(normalizedName);
+    const isProfessorScopedContext = /^outros\s*-\s*prof\./i.test(normalizeComparable(disciplina));
 
-    if (shouldFilterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile) && !hasProjetoOuTrabalhoHint) {
+    if (
+        shouldFilterCodeFiles &&
+        isCodeFile(normalizedFile) &&
+        !isTechnicalContext(normalizedFile) &&
+        !hasProjetoOuTrabalhoHint &&
+        !isProfessorScopedContext
+    ) {
         return null;
     }
 
@@ -1551,7 +1591,7 @@ export function inferMetadata(
     return {
         title: normalizeTitle(normalizedFile),
         tipo,
-        disciplina: inferDisciplina(normalizedFile),
+        disciplina,
         semester: inferSemester(normalizedFile),
         tags: inferTags(normalizedFile),
         sourcePath,
@@ -2303,7 +2343,7 @@ function getGradeSemesterFromPath(path: unknown): string {
     if (!semesterNumber || semesterNumber <= 0) {
         return "";
     }
-    return `${semesterNumber}º Semestre da Grade`;
+    return `Grade S${String(semesterNumber).padStart(2, "0")}`;
 }
 
 export function inferSemester(file: RepoFile | null | undefined): string {
@@ -2474,16 +2514,42 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
 
     const normalizedPathComparable = normalizeComparable(normalizedPath);
     const normalizedFileNameComparable = normalizeComparable(fileName.replace(/\.[^/.]+$/, ""));
-    const stageFromPathMatch = normalizedPathComparable.match(/(?:^|\/)(n|av|ap|p)\s*([1-4])(?:[._-]\d+)?(?:\/|$)/i);
-    const stageFromNameMatch = normalizedFileNameComparable.match(/\b(?:prova|avaliac(?:ao|ão)|n|av|ap|p)\s*[-_ ]?([1-4])\b/i);
-    const stageFromPath = stageFromPathMatch?.[2] ?? "";
-    const stageFromName = stageFromNameMatch?.[1] ?? "";
-    const resolvedStage = stageFromPath || stageFromName;
-    if (resolvedStage) {
-        for (const assessmentTag of ["AV1", "AV2", "AV3", "AV4"]) {
-            tags.delete(assessmentTag);
+    const stageMatches = Array.from(
+        normalizedPathComparable.matchAll(/(?:^|\/)(?:n|av|ap|p)\s*([1-4])(?:[._-]\d+)?(?:\/|$)/gi),
+    )
+        .map((match) => match[1])
+        .filter(Boolean);
+    const stageNameMatches = Array.from(
+        normalizedFileNameComparable.matchAll(/\b(?:prova|avaliac(?:ao|ão)|n|av|ap|p)\s*[-_ ]?([1-4])\b/gi),
+    )
+        .map((match) => match[1])
+        .filter(Boolean);
+    const stageSetFromPath = new Set(stageMatches);
+    const stageSetFromName = new Set(stageNameMatches);
+    const allResolvedStages = new Set<string>();
+
+    if (stageSetFromPath.size > 0) {
+        if (stageSetFromName.size <= 1) {
+            for (const assessmentTag of ["AV1", "AV2", "AV3", "AV4"]) {
+                tags.delete(assessmentTag);
+            }
         }
-        tags.add(`AV${resolvedStage}`);
+        for (const stage of stageSetFromPath) {
+            allResolvedStages.add(stage);
+        }
+        if (stageSetFromName.size > 1) {
+            for (const stage of stageSetFromName) {
+                allResolvedStages.add(stage);
+            }
+        }
+    } else {
+        for (const stage of stageSetFromName) {
+            allResolvedStages.add(stage);
+        }
+    }
+
+    for (const stage of allResolvedStages) {
+        tags.add(`AV${stage}`);
     }
 
     if (/GABARITO/i.test(fileName) || /GABARITO/i.test(normalizedPath)) {

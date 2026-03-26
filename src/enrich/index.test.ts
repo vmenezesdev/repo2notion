@@ -187,8 +187,8 @@ test("desambigua ED por professor no caminho", () => {
     const edEstrutura = makeFile("/S01/ED/2022.1 - Alisson/AP1.pdf", "AP1.pdf", "pdf");
     const edErnani = makeFile("/S01/ED/2022.1 - Ernani Leite/AP1.pdf", "AP1.pdf", "pdf");
     assert.equal(inferDisciplina(edDigital), "Estrutura de Dados");
-    assert.equal(inferDisciplina(edEstrutura), "Estrutura de Dados");
-    assert.equal(inferDisciplina(edErnani), "Estrutura de Dados");
+    assert.equal(inferDisciplina(edEstrutura), "Eletrônica Digital");
+    assert.equal(inferDisciplina(edErnani), "Eletrônica Digital");
 });
 
 test("prioriza tipo prova sobre documentacao", () => {
@@ -520,7 +520,7 @@ test("ignora pasta informal de professor ao inferir disciplina", () => {
 
 test("usa semestre da grade quando nao existe ano letivo", () => {
     const file = makeFile("/S10/EF - Etica e Filosofia/material.txt", "material.txt", "txt");
-    assert.equal(inferSemester(file), "10º Semestre da Grade");
+    assert.equal(inferSemester(file), "Grade S10");
 });
 
 test("contextualiza titulo generico com disciplina e tipo", () => {
@@ -797,6 +797,13 @@ test("prioriza estagio da pasta sobre nome da prova", () => {
     const tags = inferTags(file);
     assert.ok(tags.includes("AV2"));
     assert.ok(!tags.includes("AV1"));
+});
+
+test("preserva multiplos estagios no nome sem sobrescrever", () => {
+    const file = makeFile("/S03/EDA - Estrutura de Dados/2021.2 - PH/P1_P2.pdf", "P1_P2.pdf", "pdf");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("AV1"));
+    assert.ok(tags.includes("AV2"));
 });
 
 test("remove preposicao orfa apos limpar respostas", () => {
