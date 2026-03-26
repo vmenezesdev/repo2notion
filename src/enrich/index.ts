@@ -239,6 +239,12 @@ const GENERIC_CONTEXT_FOLDERS = new Set([
     "q2",
     "q3",
     "q4",
+    "image",
+    "images",
+    "img",
+    "imgs",
+    "asset",
+    "assets",
 ]);
 
 const TIPO_PATTERNS = {
@@ -732,6 +738,88 @@ function getYearFromText(value: unknown): string {
     return "";
 }
 
+function stripProfessorSuffixFromFolderPart(part: string): string {
+    const normalizedPart = normalizeText(part);
+    if (!normalizedPart) {
+        return "";
+    }
+
+    const splitParts = normalizedPart
+        .split(/\s*[-–—]\s*/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    if (splitParts.length < 2) {
+        return normalizedPart;
+    }
+
+    const suffix = splitParts[splitParts.length - 1] ?? "";
+    const hasProfessorSuffix = hasKnownProfessorAlias(` ${suffix} `);
+    if (!hasProfessorSuffix) {
+        return normalizedPart;
+    }
+
+    const withoutSuffix = splitParts.slice(0, -1).join(" - ").trim();
+    if (!withoutSuffix) {
+        return "";
+    }
+
+    if (/^(?:19|20)\d{2}[._\-\s]?[12]$/i.test(normalizeComparable(withoutSuffix))) {
+        return "";
+    }
+
+    return withoutSuffix;
+}
+
+function inferDisciplinaFromRepositoryRoot(path: unknown): string {
+    const parts = normalizePath(path)
+        .split("/")
+        .filter(Boolean)
+        .filter((part) => part !== "." && part !== "..");
+    const repositoryRoot = parts[0] ?? "";
+    if (!repositoryRoot) {
+        return "";
+    }
+
+    const { sigla, name } = getSiglaAndName(repositoryRoot);
+    if (name) {
+        return normalizeText(name);
+    }
+
+    if (sigla) {
+        const resolved = resolveDisciplinaBySigla(sigla, path);
+        if (resolved) {
+            return resolved;
+        }
+    }
+
+    return "";
+}
+
+function isGarbageIdLikeName(nameWithoutExt: string): boolean {
+    const normalized = normalizeText(nameWithoutExt);
+    if (!normalized) {
+        return false;
+    }
+
+    if (/^[\d_\-\s]{10,}$/.test(nameWithoutExt)) {
+        return true;
+    }
+
+    const compact = normalized.replace(/\s+/g, "");
+    if (/^\d{10,}[a-z]?$/i.test(compact)) {
+        return true;
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 3 && tokens.every((token) => /^\d+[a-z]?$/i.test(token))) {
+        return true;
+    }
+
+    const digitCount = (normalized.match(/\d/g) ?? []).length;
+    const letterCount = (normalized.match(/[A-Za-zÀ-ÿ]/g) ?? []).length;
+    return digitCount >= 10 && letterCount <= 2;
+}
+
 function getSubjectPart(path: unknown): string {
     const normalizedPath = normalizePath(path);
     const parts = normalizedPath.split("/").filter(Boolean);
@@ -744,7 +832,7 @@ function getSubjectPart(path: unknown): string {
             continue;
         }
 
-        const candidate = fixMojibake(parts[i + 1]).trim();
+        const candidate = stripProfessorSuffixFromFolderPart(fixMojibake(parts[i + 1]).trim());
         if (!candidate) {
             continue;
         }
@@ -762,7 +850,7 @@ function getSubjectPart(path: unknown): string {
     let fallback = "";
 
     for (let i = parts.length - 2; i >= 0; i -= 1) {
-        const part = fixMojibake(parts[i]).trim();
+        const part = stripProfessorSuffixFromFolderPart(fixMojibake(parts[i]).trim());
         if (!part) {
             continue;
         }
@@ -966,7 +1054,26 @@ function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefin
 }
 
 function getResolvedSiglaFromDisciplina(disciplina: string): string {
-    return SIGLA_BY_DISCIPLINA_COMPARABLE.get(normalizeComparable(disciplina)) ?? "";
+    const comparableDisciplina = normalizeComparable(disciplina);
+    if (!comparableDisciplina) {
+        return "";
+    }
+
+    const direct = SIGLA_BY_DISCIPLINA_COMPARABLE.get(comparableDisciplina);
+    if (direct) {
+        return direct;
+    }
+
+    for (const [disciplinaComparable, sigla] of SIGLA_BY_DISCIPLINA_COMPARABLE.entries()) {
+        if (
+            comparableDisciplina.startsWith(`${disciplinaComparable} `) ||
+            disciplinaComparable.startsWith(`${comparableDisciplina} `)
+        ) {
+            return sigla;
+        }
+    }
+
+    return "";
 }
 
 function dedupeTagsByContent(tags: string[], protectedTags: string[] = []): string[] {
@@ -982,6 +1089,22 @@ function dedupeTagsByContent(tags: string[], protectedTags: string[] = []): stri
         if (normalizedProtected.has(current)) {
             return true;
         }
+
+        const hasEquivalentSigla = allTags.some((otherTag, otherIndex) => {
+            if (otherIndex === index) {
+                return false;
+            }
+            const candidateSigla = normalizeSigla(otherTag);
+            if (!isLikelySigla(candidateSigla)) {
+                return false;
+            }
+            const resolvedDisciplina = resolveDisciplinaBySigla(candidateSigla);
+            return resolvedDisciplina && normalizeComparable(resolvedDisciplina) === current;
+        });
+        if (hasEquivalentSigla) {
+            return false;
+        }
+
         if (/^(?:av|n|ap|p)\d(?:\.\d+)?$/i.test(current) || current === "af") {
             return true;
         }
@@ -1189,6 +1312,10 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .replace(/\s{2,}/g, " ")
             .trim();
         const target = pudSubject || subject;
+        const pudSigla = subjectSigla || getResolvedSiglaFromDisciplina(target);
+        if (pudSigla) {
+            return `${pudSigla} - Plano de Ensino`;
+        }
         return target ? `Plano de Ensino - ${target}` : "Plano de Ensino";
     }
 
@@ -1210,6 +1337,11 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/\s*\(\s*(?:copia|copy)\s*\d*\s*\)\s*$/i, "")
         .replace(/\s+/g, " ")
         .trim();
+
+    const shouldUseGarbageFallback = isGarbageIdLikeName(nameWithoutExt) || isGarbageIdLikeName(cleanedName);
+    if (shouldUseGarbageFallback) {
+        cleanedName = "";
+    }
 
     const normalizedOriginalName = normalizeComparable(nameWithoutExt);
     const hasGabaritoHint = /\b(gabarito|answer\s*key|respostas?)\b/i.test(normalizedOriginalName);
@@ -1361,6 +1493,19 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const ignoredFolderImageTitle = inferImageTitleFromIgnoredFolderContext(file, normalizedName);
     if (ignoredFolderImageTitle) {
         return ignoredFolderImageTitle;
+    }
+
+    if (shouldUseGarbageFallback) {
+        const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
+        const contextualTipo = inferGenericTitleTypeLabel(tipo);
+        if (displaySubject) {
+            const semesterSuffix = semester ? ` (${semester})` : "";
+            return `${displaySubject} - ${contextualTipo}${semesterSuffix}`;
+        }
+        if (semester) {
+            return `${contextualTipo} (${semester})`;
+        }
+        return contextualTipo;
     }
 
     cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
@@ -1518,6 +1663,10 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isHardwareFile = HARDWARE_EXTENSIONS.has(extension);
     const hasSemesterFolder = /(^|\/)s\d{1,2}(\/|$)/i.test(path);
     const hasAcademicSemester = /(?:19|20)\d{2}[._\-\s]?[12]/.test(path);
+    const isAssessmentAncestorFolder = pathParts.some((part) =>
+        /^(?:provas?|n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|p[1-4]|af)$/i.test(normalizeComparable(part)),
+    );
+    const hasProjetoHint = /\bprojet(?:o|os)\b/i.test(name) || /\bprojet(?:o|os)\b/i.test(contextualPath);
 
     if (["dsn", "pdsprj", "pdsit"].includes(extension) && (isProvasFolder || isRootProvasFolder)) {
         return "Prova";
@@ -1551,12 +1700,24 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Prova";
     }
 
+    if (IMAGE_EXTENSIONS.has(extension) && isAssessmentAncestorFolder) {
+        return "Prova";
+    }
+
     if (isProva || isProvasFolder || isAssessmentFolder) {
         return "Prova";
     }
 
+    if (IMAGE_EXTENSIONS.has(extension) && isAula && !isAssessmentFolder && !isAssessmentParentFolder) {
+        return "Material de Aula";
+    }
+
     if (["dsn", "pdsprj", "pdsit", "m"].includes(extension) && isAula) {
         return "Material de Aula";
+    }
+
+    if (["m", "py"].includes(extension) && isTechnicalContext(file) && !hasProjetoHint) {
+        return "Script/Simulação";
     }
 
     if (
@@ -1602,7 +1763,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
     const parts = path.split("/").filter(Boolean);
 
     for (let i = parts.length - 2; i >= 0; i -= 1) {
-        const part = fixMojibake(parts[i]).trim();
+        const part = stripProfessorSuffixFromFolderPart(fixMojibake(parts[i]).trim());
         if (!part) {
             continue;
         }
@@ -1665,6 +1826,11 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
     const inferredFromFileName = inferDisciplinaFromFileName(file?.name);
     if (inferredFromFileName) {
         return inferredFromFileName;
+    }
+
+    const inferredFromRepoRoot = inferDisciplinaFromRepositoryRoot(path);
+    if (inferredFromRepoRoot) {
+        return inferredFromRepoRoot;
     }
 
     return "Geral";
@@ -1890,5 +2056,16 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         }
         return !/^\d+\s*[.)-]\s*/.test(normalizeText(tag));
     });
-    return dedupeTagsByContent(cleanedTags, [resolvedSigla]);
+
+    const normalizedDisciplina = normalizeComparable(disciplina);
+    const normalizedResolvedDisciplina = normalizeComparable(resolveDisciplinaBySigla(resolvedSigla, normalizedPath));
+    const shouldDropDisciplinaTag =
+        Boolean(resolvedSigla) &&
+        Boolean(normalizedDisciplina) &&
+        normalizedDisciplina === normalizedResolvedDisciplina;
+
+    const semanticallyDedupedTags = shouldDropDisciplinaTag
+        ? cleanedTags.filter((tag) => normalizeComparable(tag) !== normalizedDisciplina)
+        : cleanedTags;
+    return dedupeTagsByContent(semanticallyDedupedTags, [resolvedSigla]);
 }

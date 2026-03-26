@@ -87,7 +87,7 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "PUD Calculo I.doc",
         "doc",
     );
-    assert.equal(normalizeTitle(pudFile), "Plano de Ensino - Calculo I");
+    assert.equal(normalizeTitle(pudFile), "CA - Plano de Ensino");
 
     const provaImagem = makeFile(
         "/S01/CA - Calculo/2018.1 - PH/N2/N2 prova 1.jpeg",
@@ -103,7 +103,7 @@ test("nao interpreta timestamp como parte", () => {
         "P_20170530_141545.jpg",
         "jpg",
     );
-    assert.equal(normalizeTitle(file), "Cálculo - Prova - 2017.1");
+    assert.equal(normalizeTitle(file), "Cálculo - Prova (2017.1)");
 });
 
 test("preserva nome descritivo em imagem de prova", () => {
@@ -527,7 +527,7 @@ test("trata readme de raiz e src como ruido", () => {
 
 test("limpa codigos e redundancia em titulo de PUD", () => {
     const file = makeFile("/Documentos/PUDS/S01/CA - Calculo I/1916473-O PUD Calculo I.pdf", "1916473-O PUD Calculo I.pdf", "pdf");
-    assert.equal(normalizeTitle(file), "Plano de Ensino - Calculo I");
+    assert.equal(normalizeTitle(file), "CA - Plano de Ensino");
 });
 
 test("preserva ano no inicio de nome de prova", () => {
@@ -592,5 +592,57 @@ test("mantem prova para hardware em pasta provas explicita", () => {
 test("inclui sigla resolvida em tags mesmo sem sigla no caminho", () => {
     const tags = inferTags(makeFile("/S04/Processamento Digital de Sinais/2020.2 - Ricardo Rodriges/AP1.png", "AP1.png", "png"));
     assert.ok(tags.includes("PDS"));
-    assert.ok(tags.includes("Processamento Digital de Sinais"));
+    assert.ok(!tags.includes("Processamento Digital de Sinais"));
+});
+
+test("usa fallback contextual para nomes lixo com ids numericos", () => {
+    const file = makeFile(
+        "/S03/AC - Arquitetura de Computadores/2022.1 - PH/537122_321876307865798_999999999_n.jpg",
+        "537122_321876307865798_999999999_n.jpg",
+        "jpg",
+    );
+    assert.equal(normalizeTitle(file), "Arquitetura de Computadores - Prova (2022.1)");
+});
+
+test("classifica python tecnico como script simulacao quando nao e projeto", () => {
+    const file = makeFile(
+        "/S05/IAI - Introducao a Automacao Industrial/2024.1 - PH/Aula 03/simulacao_motor.py",
+        "simulacao_motor.py",
+        "py",
+    );
+    assert.equal(inferTipo(file), "Script/Simulação");
+});
+
+test("classifica imagem em pasta de aula como material de aula", () => {
+    const file = makeFile(
+        "/S05/IAI - Introducao a Automacao Industrial/2024.1 - PH/Aulas/Aula 03/diagrama.png",
+        "diagrama.png",
+        "png",
+    );
+    assert.equal(inferTipo(file), "Material de Aula");
+});
+
+test("remove professor do nome da disciplina em pasta sigla-nome", () => {
+    const file = makeFile(
+        "/S01/CA - Calculo I - Fernando Macedo/2014.2/N1.pdf",
+        "N1.pdf",
+        "pdf",
+    );
+    assert.equal(inferDisciplina(file), "Calculo I");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("Fernando Macedo"));
+});
+
+test("ignora git com barras duplas antes do processamento", () => {
+    const file = makeFile("../provas//.git/FETCH_HEAD", "FETCH_HEAD", "");
+    assert.equal(inferMetadata(file), null);
+});
+
+test("extrai disciplina do nome do repositorio quando aplicavel", () => {
+    const file = makeFile(
+        "../IAI - Introducao a Automacao Industrial/src/images/repo.jpg",
+        "repo.jpg",
+        "jpg",
+    );
+    assert.equal(inferDisciplina(file), "Introdução à Automação Industrial");
 });
