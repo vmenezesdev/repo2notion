@@ -68,7 +68,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
 
 const TIPO_PATTERNS = {
     prova: [
-        /(^|\b)(ap\s*[1-3]?|av\s*[12]|af|p\s*[12]|prova|avaliac[aã]o|simulado)(\b|$)/i,
+        /(^|\b)(p[1-4]|ap[1-4]|av[1-4]|af|prova|avaliac[aã]o|simulado)(\b|$)/i,
         /(\/|\b)(provas?|avaliac(?:oes|o(?:es)?)|simulados?)(\/|\b)/i,
     ],
     lista: [
@@ -86,7 +86,15 @@ const TIPO_PATTERNS = {
     resumo: [
         /(^|\b)(resumo|anota[cç][oõ]es?|caderno|mapa\s*mental|cola)(\b|$)/i,
     ],
+    documentacao: [
+        /(^|\b)(manual|guia|roteiro|aviso|ementa|cronograma|instru[cç][aã]o|documenta[cç][aã]o)(\b|$)/i,
+        /(\/|\b)(documentos?|docs?|guias?|avisos?)(\/|\b)/i,
+    ],
 };
+
+const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monitoria)(\/|\b)/i;
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
+const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 
 const TAG_BY_EXTENSION: Record<string, string> = {
     c: "C",
@@ -104,6 +112,13 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     dsn: "Proteus",
     pdsprj: "Proteus",
     tex: "LaTeX",
+    png: "Imagem",
+    jpg: "Imagem",
+    jpeg: "Imagem",
+    gif: "Imagem",
+    svg: "Imagem",
+    txt: "Texto",
+    md: "Texto",
     rar: "Compactado",
     zip: "Compactado",
     "7z": "Compactado",
@@ -190,7 +205,7 @@ function fixMojibake(value: unknown): string {
 }
 
 function normalizeText(value: unknown): string {
-    return stripDiacritics(fixMojibake(value))
+    return fixMojibake(value)
         .normalize("NFKC")
         .replace(/[_]+/g, " ")
         .replace(/\s+/g, " ")
@@ -198,7 +213,7 @@ function normalizeText(value: unknown): string {
 }
 
 function normalizeComparable(value: unknown): string {
-    return normalizeText(value).toLowerCase();
+    return stripDiacritics(normalizeText(value)).toLowerCase();
 }
 
 function normalizeSigla(value: unknown): string {
@@ -357,6 +372,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const nameWithoutExt = fixMojibake(originalName.replace(/\.[^/.]+$/, ""));
     const cleanedName = normalizeText(nameWithoutExt)
         .replace(/^\d{5,}[-_\s]*/, "")
+        .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
         .replace(/[\-]+/g, " ")
         .replace(/\s+/g, " ")
         .trim();
@@ -374,24 +390,41 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const path = normalizeComparable(normalizePath(file?.path));
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
 
-    if (TIPO_PATTERNS.prova.some((pattern) => pattern.test(name) || pattern.test(path))) {
-        return "Prova";
-    }
+    const isAula = TIPO_PATTERNS.aula.some((pattern) => pattern.test(name) || pattern.test(path));
+    const isLista = TIPO_PATTERNS.lista.some((pattern) => pattern.test(name) || pattern.test(path));
+    const isResumo = TIPO_PATTERNS.resumo.some((pattern) => pattern.test(name) || pattern.test(path));
+    const isProva = TIPO_PATTERNS.prova.some((pattern) => pattern.test(name) || pattern.test(path));
+    const isDocumentacao =
+        TIPO_PATTERNS.documentacao.some((pattern) => pattern.test(name) || pattern.test(path)) ||
+        TEXT_EXTENSIONS.has(extension);
+    const isMaterialFolder = MATERIAL_FOLDER_PATTERN.test(path);
 
-    if (TIPO_PATTERNS.lista.some((pattern) => pattern.test(name) || pattern.test(path))) {
+    if (isLista) {
         return "Lista de Exercícios";
     }
 
-    if (TIPO_PATTERNS.aula.some((pattern) => pattern.test(name) || pattern.test(path))) {
+    if (isAula || (isMaterialFolder && !isProva)) {
         return "Material de Aula";
+    }
+
+    if (isDocumentacao && !isProva) {
+        return "Documentação";
     }
 
     if (TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(path)) || ["py", "c", "java", "pdsprj", "dsn", "cpp", "js", "ts"].includes(extension)) {
         return "Trabalho/Projeto";
     }
 
-    if (TIPO_PATTERNS.resumo.some((pattern) => pattern.test(name) || pattern.test(path))) {
+    if (isResumo) {
         return "Resumo";
+    }
+
+    if (isProva) {
+        return "Prova";
+    }
+
+    if (IMAGE_EXTENSIONS.has(extension)) {
+        return "Material Complementar";
     }
 
     return "Material Complementar";
