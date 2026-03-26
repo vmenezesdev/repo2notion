@@ -19,6 +19,7 @@ const NOISE_PATH_MARKERS = [
     "/__pycache__/",
     "/venv/",
     "/.venv/",
+    "/src/images/",
     "/conteudo anterior/",
     "/conteúdo anterior/",
 ];
@@ -488,6 +489,10 @@ function fixMojibake(value: unknown): string {
     const replacements: Array<[RegExp, string]> = [
         [/Ã_cios/g, "ícios"],
         [/Ã_cio/g, "ício"],
+        [/Ã_cias/g, "ícias"],
+        [/Ã_cia/g, "ícia"],
+        [/Ã§Ã£/g, "çã"],
+        [/Ã£o/g, "ão"],
         [/Ã¡/g, "á"],
         [/Ã /g, "à"],
         [/Ã¢/g, "â"],
@@ -1161,6 +1166,11 @@ function isNoiseFile(file: RepoFile | null | undefined): boolean {
     if (NOISE_PATH_MARKERS.some((marker) => normalizedPath.includes(marker))) {
         return true;
     }
+
+    if (normalizedPath.includes("/src/") && inferDisciplina(file) === "Geral") {
+        return true;
+    }
+
     if (normalizedPathParts.some((part) => NOISE_FOLDER_PARTS.has(part))) {
         return true;
     }
@@ -1320,7 +1330,8 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     let cleanedName = normalizeText(nameWithoutExt)
-        .replace(/^\d{5,}[-_\s]*/, "")
+        .replace(/^\d{5,}[._\-\s]*/, "")
+        .replace(/\b\d{7,}\b/g, "")
         .replace(/^\d{5,}(?=[A-Za-z])/, "")
         .replace(/^(?:\d+\s*[-–—]\s*)/, "")
         .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
@@ -1460,6 +1471,10 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         cleanedName = normalizeText(nameWithoutExt);
     }
 
+    if (tipo === "Material de Aula" || tipo === "Documentação") {
+        cleanedName = cleanedName.replace(/^\s*(?:prova|avaliac(?:ao|ão))\b\s*[-–—:]?\s*/i, "").trim();
+    }
+
     if (resolutionPrefix) {
         if (!cleanedName || /^\d+$/.test(cleanedName)) {
             const listNumberFromOriginal =
@@ -1583,7 +1598,8 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     const normalizedCleanedName = normalizeComparable(cleanedName);
-    const isGenericAssessmentName = /^(?:prova(?:\s+\d+)?|n\s*[1-4]|(?:av|ap|p)\s*[1-4])$/i.test(normalizedCleanedName);
+    const isGenericAssessmentName =
+        tipo === "Prova" && /^(?:prova(?:\s+\d+)?|n\s*[1-4]|(?:av|ap|p)\s*[1-4])$/i.test(normalizedCleanedName);
     const displaySubject = subject && subject !== "Geral" ? subject : subjectSigla;
     const professor = inferProfessorFromPath(file?.path);
 
@@ -1657,13 +1673,16 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path) || /(^|\/)puds?(\/|$)/i.test(path);
     const isRootProvasFolder = /^provas?(?:\b|\s|$)/i.test(normalizeComparable(pathParts[0] ?? ""));
     const isProvasFolder = nestedParts.some((part) => /^provas?(?:\b|\s|$)/i.test(normalizeComparable(part)));
+    const isExplicitAulaFolder = nestedParts.some((part) =>
+        /^(?:aulas?|material(?:\s*de)?\s*apoio|material|slides?)(?:\b|\s|$)/i.test(normalizeComparable(part)),
+    );
     const isAssessmentFolder = /(^|\/)(n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|af)(\/|$)/i.test(contextualPath);
     const parentFolder = normalizeComparable(pathParts[pathParts.length - 2] ?? "");
     const isAssessmentParentFolder = /^(?:provas?|n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|p[1-4]|af)$/.test(parentFolder);
     const isHardwareFile = HARDWARE_EXTENSIONS.has(extension);
     const hasSemesterFolder = /(^|\/)s\d{1,2}(\/|$)/i.test(path);
     const hasAcademicSemester = /(?:19|20)\d{2}[._\-\s]?[12]/.test(path);
-    const isAssessmentAncestorFolder = pathParts.some((part) =>
+    const isAssessmentAncestorFolder = nestedParts.some((part) =>
         /^(?:provas?|n[1-4](?:[._-]\d+)?|av[1-4]|ap[1-4]|p[1-4]|af)$/i.test(normalizeComparable(part)),
     );
     const hasProjetoHint = /\bprojet(?:o|os)\b/i.test(name) || /\bprojet(?:o|os)\b/i.test(contextualPath);
@@ -1688,11 +1707,34 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Administrativo/Estágio";
     }
 
+    if (["m", "py"].includes(extension) && isTechnicalContext(file) && !hasProjetoHint) {
+        return "Script/Simulação";
+    }
+
+    if (
+        (isAula || isMaterialFolder || isExplicitAulaFolder) &&
+        !isProva &&
+        !isProvasFolder &&
+        !isAssessmentFolder &&
+        !isAssessmentParentFolder &&
+        !isAssessmentAncestorFolder
+    ) {
+        return "Material de Aula";
+    }
+
     if (isHardwareFile && !isRootProvasFolder && !isProvasFolder) {
         return "Trabalho/Projeto";
     }
 
-    if (isRootProvasFolder && IMAGE_EXTENSIONS.has(extension) && hasSemesterFolder && hasAcademicSemester) {
+    if (
+        isRootProvasFolder &&
+        IMAGE_EXTENSIONS.has(extension) &&
+        hasSemesterFolder &&
+        hasAcademicSemester &&
+        !isAula &&
+        !isMaterialFolder &&
+        !isExplicitAulaFolder
+    ) {
         return "Prova";
     }
 
@@ -1714,10 +1756,6 @@ export function inferTipo(file: RepoFile | null | undefined): string {
 
     if (["dsn", "pdsprj", "pdsit", "m"].includes(extension) && isAula) {
         return "Material de Aula";
-    }
-
-    if (["m", "py"].includes(extension) && isTechnicalContext(file) && !hasProjetoHint) {
-        return "Script/Simulação";
     }
 
     if (

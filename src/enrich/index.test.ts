@@ -126,6 +126,13 @@ test("corrige mojibake comum brasileiro", () => {
 
     const pluralFile = makeFile("/S02/EA - Eletronica Analogica/2019.2 - MJ/ExercÃ_cios_2.pdf", "ExercÃ_cios_2.pdf", "pdf");
     assert.equal(normalizeTitle(pluralFile), "Exercícios 2");
+
+    const fixaFile = makeFile(
+        "/S02/EA - Eletronica Analogica/2019.2 - MJ/1917674-1_-_ExercÃ_cio_de_FixaÃ§Ã£o.pdf",
+        "1917674-1_-_ExercÃ_cio_de_FixaÃ§Ã£o.pdf",
+        "pdf",
+    );
+    assert.equal(normalizeTitle(fixaFile), "Exercício de Fixação");
 });
 
 test("contextualiza titulos genericos com sigla e semestre", () => {
@@ -622,6 +629,16 @@ test("classifica imagem em pasta de aula como material de aula", () => {
     assert.equal(inferTipo(file), "Material de Aula");
 });
 
+test("prioriza pasta de aula mesmo quando raiz e provas", () => {
+    const file = makeFile(
+        "../provas//S05/IAI - Introducao a Automacao Industrial/2024.1 - PH/Aulas/Aula 01/diagrama.png",
+        "diagrama.png",
+        "png",
+    );
+    assert.equal(inferTipo(file), "Material de Aula");
+    assert.ok(!/^Prova\b/i.test(normalizeTitle(file)));
+});
+
 test("remove professor do nome da disciplina em pasta sigla-nome", () => {
     const file = makeFile(
         "/S01/CA - Calculo I - Fernando Macedo/2014.2/N1.pdf",
@@ -645,4 +662,13 @@ test("extrai disciplina do nome do repositorio quando aplicavel", () => {
         "jpg",
     );
     assert.equal(inferDisciplina(file), "Introdução à Automação Industrial");
+});
+
+test("filtra imagens de documentacao em src/images", () => {
+    const file = makeFile(
+        "../IAI - Introducao a Automacao Industrial/src/images/commit.jpg",
+        "commit.jpg",
+        "jpg",
+    );
+    assert.equal(inferMetadata(file), null);
 });
