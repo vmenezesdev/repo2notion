@@ -256,7 +256,8 @@ const TIPO_PATTERNS = {
         /(\/|\b)(provas?|avaliac(?:oes|o(?:es)?)|simulados?)(\/|\b)/i,
     ],
     lista: [
-        /(^|\b)(lista|listagem|exerc[ií]c(?:io|ios)?|folha\s*de\s*exerc[ií]cios?|td|exerc)(\b|$)/i,
+        /^\d+\s*(?:a|ª|o|º)?\s*lista(?:gem)?(?:\s*de)?/i,
+        /(^|\b)(lista(?:gem)?(?:\s*de)?|exerc[ií]c(?:io|ios)?|folha\s*de\s*exerc[ií]cios?|td|exerc)(\b|$)/i,
         /(^|\b)(assignment|homework|problem\s*set)(\b|$)/i,
         /(\/|\b)(listas?|exercicios?|tutoriais?)(\/|\b)/i,
     ],
@@ -280,15 +281,15 @@ const TIPO_PATTERNS = {
         /(\/|\b)(est[aá]gio|estagio|administrativo|secretaria)(\/|\b)/i,
     ],
     gabaritoResolucao: [
-        /(^|\b)(gabarito|resolu[cç][aã]o|solu[cç][aã]o|respostas?|answer\s*key|solution|resolvidos)(\b|$)/i,
+        /(^|\b)(gabaritos?|resolu[cç][aã]o|solu[cç][aã]o|respostas?|answer\s*key|solution|resolvidos)(\b|$)/i,
     ],
 };
 
 const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monitoria)(\/|\b)/i;
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
-const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
-const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "pdsit", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof", "qsf"]);
+const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm", "af", "idl"]);
+const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "pdsit", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof", "qsf", "mcp", "mcs", "mcw"]);
 const TECHNICAL_SIGLAS = new Set([
     "ED",
     "EA",
@@ -425,6 +426,8 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     js: "JavaScript",
     ts: "TypeScript",
     sql: "SQL",
+    idl: "IDL",
+    af: "Automaton",
     m: "MATLAB",
     ipynb: "Jupyter",
     dsn: "Proteus",
@@ -436,6 +439,9 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     vpr: "Quartus",
     sof: "Quartus",
     pof: "Quartus",
+    mcp: "MPLAB",
+    mcs: "MPLAB",
+    mcw: "MPLAB",
     tex: "LaTeX",
     png: "Imagem",
     jpg: "Imagem",
@@ -482,7 +488,13 @@ function stripDiacritics(value: unknown): string {
 function fixMojibake(value: unknown): string {
     const safeValue = safeString(value);
 
-    if (!/[ÃÂ]/.test(safeValue)) {
+    const hasMojibakeHints =
+        /Ã[\u0080-\u00BF]/.test(safeValue) ||
+        /Â[\u0080-\u00BF]/.test(safeValue) ||
+        /Ã[_^?($]/.test(safeValue) ||
+        /�/.test(safeValue);
+
+    if (!hasMojibakeHints) {
         return safeValue;
     }
 
@@ -550,7 +562,7 @@ function fixMojibake(value: unknown): string {
         [/Âº/g, "º"],
         [/Âª/g, "ª"],
         [/Â°/g, "°"],
-        [/Â/g, ""],
+        [/Â(?=\s|$|[.,;:!?\)\]\}])/g, ""],
     ];
 
     let fixed = safeValue;
@@ -572,6 +584,15 @@ function normalizeText(value: unknown): string {
     return fixMojibake(value)
         .normalize("NFKC")
         .replace(/[_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function splitJoinedTitleTokens(value: string): string {
+    return value
+        .replace(/([a-zà-ÿ])([A-ZÀ-Ý])/g, "$1 $2")
+        .replace(/([A-ZÀ-Ý])([A-ZÀ-Ý][a-zà-ÿ])/g, "$1 $2")
+        .replace(/\blistade\b/gi, "lista de")
         .replace(/\s+/g, " ")
         .trim();
 }
@@ -837,7 +858,7 @@ function getSubjectPart(path: unknown): string {
     const normalizedPath = normalizePath(path);
     const parts = normalizedPath.split("/").filter(Boolean);
 
-    const siglaNamePattern = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/;
+    const siglaNamePattern = /^\s*[A-Za-z]{2,10}\s*[-–—_]\s*.+$/;
 
     for (let i = 0; i < parts.length - 2; i += 1) {
         const part = fixMojibake(parts[i]).trim();
@@ -914,7 +935,7 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     const normalizedSubject = fixMojibake(subjectPart).trim();
-    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*[-–—]\s*(.+)$/);
+    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*[-–—_]\s*(.+)$/);
     if (compactSiglaMatch) {
         return {
             sigla: normalizeSigla(compactSiglaMatch[1]),
@@ -922,7 +943,18 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
         };
     }
 
-    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s*[-–—]\s*/);
+    const spacedSiglaMatch = normalizedSubject.match(/^\s*([A-Z]{2,10})\s+(.+)$/);
+    if (spacedSiglaMatch) {
+        const sigla = normalizeSigla(spacedSiglaMatch[1]);
+        if (DISCIPLINA_BY_SIGLA[sigla] || isLikelySigla(sigla)) {
+            return {
+                sigla,
+                name: spacedSiglaMatch[2].trim(),
+            };
+        }
+    }
+
+    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s*[-–—_]\s*/);
     const sigla = normalizeSigla(siglaRaw ?? "");
     const name = nameParts.join(" - ").trim();
 
@@ -1378,6 +1410,8 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         .replace(/\s+/g, " ")
         .trim();
 
+    cleanedName = splitJoinedTitleTokens(cleanedName);
+
     const shouldUseGarbageFallback = isGarbageIdLikeName(nameWithoutExt) || isGarbageIdLikeName(cleanedName);
     if (shouldUseGarbageFallback) {
         cleanedName = "";
@@ -1386,7 +1420,17 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const normalizedOriginalName = normalizeComparable(nameWithoutExt);
     const hasGabaritoHint = /\b(gabarito|answer\s*key|respostas?)\b/i.test(normalizedOriginalName);
     const hasResolucaoHint = /\b(resolu[cç][aã]o|solu[cç][aã]o|resolvidos|solution)\b/i.test(normalizedOriginalName);
-    const resolutionPrefix = hasGabaritoHint ? "Gabarito" : hasResolucaoHint ? "Resolução" : "";
+    const resolutionPrefix = tipo === "Gabarito/Resolução"
+        ? hasGabaritoHint
+            ? "Gabarito"
+            : hasResolucaoHint
+                ? "Resolução"
+                : "Gabarito"
+        : hasGabaritoHint
+            ? "Gabarito"
+            : hasResolucaoHint
+                ? "Resolução"
+                : "";
 
     if (resolutionPrefix) {
         cleanedName = cleanedName
@@ -1431,13 +1475,13 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     if (tipo === "Lista de Exercícios") {
         const listMarkerMatch = cleanedName.match(
-            /^\s*(?:(\d+)\s*(?:a|ª|o|º)?\s*(?:lista(?:gem)?)|(?:lista(?:gem)?)\s*(\d+))\b[:\-\s]*/i,
+            /^\s*(?:(\d+)\s*(?:a|ª|o|º)?\s*(?:lista(?:gem)?(?:\s*de)?)|(?:lista(?:gem)?(?:\s*de)?)\s*(\d+))\b[:\-\s]*/i,
         );
         const listNumber = listMarkerMatch?.[1] || listMarkerMatch?.[2] || "";
         if (listMarkerMatch?.[0]) {
             cleanedName = cleanedName.slice(listMarkerMatch[0].length).replace(/^[-–—:]+\s*/, "").trim();
         } else {
-            cleanedName = cleanedName.replace(/^\s*(?:lista(?:gem)?)\b[:\-\s]*/i, "").trim();
+            cleanedName = cleanedName.replace(/^\s*(?:lista(?:gem)?(?:\s*de)?)\b[:\-\s]*/i, "").trim();
         }
 
         if (listNumber) {
@@ -1685,16 +1729,15 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 }
 
 export function inferTipo(file: RepoFile | null | undefined): string {
-    const name = normalizeComparable(file?.name);
+    const name = normalizeComparable(safeString(file?.name).replace(/\.[^/.]+$/, ""));
     const normalizedPath = normalizePath(file?.path);
     const path = normalizeComparable(normalizedPath);
     const extension = normalizeComparable(file?.extension).replace(/^\./, "");
-    const nameWithoutExt = fixMojibake(safeString(file?.name).replace(/\.[^/.]+$/, ""));
     const pathParts = normalizedPath
         .split("/")
         .filter(Boolean)
         .filter((part) => part !== "." && part !== "..");
-    const nestedParts = pathParts.slice(1);
+    const nestedParts = pathParts.slice(1, -1);
     const contextualPath = normalizeComparable(`/${nestedParts.join("/")}/`);
 
     const isAula = TIPO_PATTERNS.aula.some((pattern) => pattern.test(name) || pattern.test(contextualPath));
@@ -1797,7 +1840,7 @@ export function inferTipo(file: RepoFile | null | undefined): string {
 
     if (
         TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(contextualPath)) ||
-        ["py", "c", "java", "pdsprj", "pdsbak", "pdsit", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
+        ["py", "c", "java", "pdsprj", "pdsbak", "pdsit", "dsn", "cpp", "js", "ts", "hex", "cof", "asm", "af", "idl", "mcp", "mcs", "mcw"].includes(extension)
     ) {
         return "Trabalho/Projeto";
     }
@@ -1846,7 +1889,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const comparable = normalizeComparable(part);
         const { sigla, name } = getSiglaAndName(part);
         const hasLetterInSigla = /[A-Z]/.test(sigla);
-        const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*-\s*.+$/.test(part);
+        const hasExplicitName = /^\s*[A-Za-z]{2,10}\s*[-–—_]\s*.+$/.test(part);
         const hasGenericPrefix = /^(?:trabalho|projeto|project|atividade|lista|lab|aula)s?\b/i.test(comparable);
         const isGenericContextFolder =
             GENERIC_CONTEXT_FOLDERS.has(comparable) ||
@@ -1908,6 +1951,11 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         return inferredFromRepoRoot;
     }
 
+    const inferredFromProfessorContext = inferDisciplinaFromProfessorContext(file);
+    if (inferredFromProfessorContext) {
+        return inferredFromProfessorContext;
+    }
+
     const professor = inferProfessorFromPath(path);
     if (professor) {
         return `Outros - Prof. ${professor}`;
@@ -1932,6 +1980,47 @@ function inferDisciplinaFromFileName(fileName: unknown): string {
         .replace(/\s*[-–—:]?\s*(?:\d{4}(?:[._\-\s]?[12])?)$/i, "")
         .replace(/\s+/g, " ")
         .trim();
+}
+
+function inferDisciplinaFromProfessorContext(file: RepoFile | null | undefined): string {
+    const path = normalizePath(file?.path);
+    const professor = inferProfessorFromPath(path);
+    if (professor !== "Ronaldo Fernandes Ramos") {
+        return "";
+    }
+
+    const extension = normalizeComparable(file?.extension).replace(/^\./, "");
+    const context = `${normalizeComparable(path)} ${normalizeComparable(file?.name)}`;
+    const poHints = [
+        /\bbubble\s*sort\b/i,
+        /\bmerge\s*sort\b/i,
+        /\bquick\s*sort\b/i,
+        /\bselection\s*sort\b/i,
+        /\binsertion\s*sort\b/i,
+        /\bheap\s*sort\b/i,
+        /\b(ordena[cç][aã]o|ordenacao|sort|sorting|busca|search|hash|arvore|tree)\b/i,
+    ];
+    const pooHints = [
+        /\b(oop|poo|orientad[ao] a objetos|objeto|classe|encapsul|heranc|polimorf|uml)\b/i,
+        /\b(java|csharp|c#)\b/i,
+    ];
+
+    const hasPoHint = poHints.some((pattern) => pattern.test(context));
+    const hasPooHint = pooHints.some((pattern) => pattern.test(context));
+
+    if (hasPoHint && !hasPooHint) {
+        return "Pesquisa e Ordenação";
+    }
+
+    if (hasPooHint && !hasPoHint) {
+        return "Programação Orientada a Objetos";
+    }
+
+    if (["ipynb", "af", "idl"].includes(extension) && hasPoHint) {
+        return "Pesquisa e Ordenação";
+    }
+
+    return "";
 }
 
 function getGradeSemesterFromPath(path: unknown): string {
@@ -2019,7 +2108,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add(extensionTag);
     }
 
-    if (["dsn", "pdsprj", "pdsit", "pdsbak", "m", "fig", "bdf", "bsf", "vpr", "sof", "pof"].includes(extension)) {
+    if (["dsn", "pdsprj", "pdsit", "pdsbak", "m", "fig", "bdf", "bsf", "vpr", "sof", "pof", "mcp", "mcs", "mcw", "af"].includes(extension)) {
         tags.add("Simulação");
     }
 
@@ -2027,7 +2116,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Hardware");
     }
 
-    if (["dsn", "pdsprj", "pdsit"].includes(extension)) {
+    if (["dsn", "pdsprj", "pdsit", "mcp", "mcs", "mcw"].includes(extension)) {
         tags.add("Projeto");
     }
 

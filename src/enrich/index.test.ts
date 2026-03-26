@@ -697,6 +697,49 @@ test("extrai disciplina do nome do repositorio quando aplicavel", () => {
     assert.equal(inferDisciplina(file), "Introdução à Automação Industrial");
 });
 
+test("preserva diacriticos maiusculos em titulos limpos", () => {
+    const file = makeFile("/S03/ATC - Aspectos Teoricos da Computacao/2024.1 - PH/lista-INDUÇÃO.pdf", "lista-INDUÇÃO.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "INDUÇÃO");
+});
+
+test("separa palavras coladas em lista com camel case", () => {
+    const file = makeFile(
+        "/S02/EA - Eletronica Analogica/2024.1 - PH/1aListadeExercíciosEletrônicaComputação.pdf",
+        "1aListadeExercíciosEletrônicaComputação.pdf",
+        "pdf",
+    );
+    assert.equal(normalizeTitle(file), "Lista 1 - Exercícios Eletrônica Computação");
+});
+
+test("classifica extensoes tecnicas novas como projeto", () => {
+    const afFile = makeFile("/S03/ATC - Aspectos Teoricos da Computacao/2024.1 - PH/automato.af", "automato.af", "af");
+    const idlFile = makeFile("/S04/PPD - Programacao Paralela e Distribuida/2024.1 - PH/cliente.idl", "cliente.idl", "idl");
+    const mcpFile = makeFile("/S05/MI - Microcontroladores/2024.1 - PH/projeto_final.mcp", "projeto_final.mcp", "mcp");
+
+    assert.equal(inferTipo(afFile), "Trabalho/Projeto");
+    assert.equal(inferTipo(idlFile), "Trabalho/Projeto");
+    assert.equal(inferTipo(mcpFile), "Trabalho/Projeto");
+    const tags = inferTags(mcpFile);
+    assert.ok(tags.includes("Hardware"));
+    assert.ok(tags.includes("Projeto"));
+});
+
+test("prefixa gabarito quando categoria vem do contexto", () => {
+    const file = makeFile("/S01/CA - Calculo/2024.1 - PH/Gabaritos/Lista 1.pdf", "Lista 1.pdf", "pdf");
+    assert.equal(inferTipo(file), "Gabarito/Resolução");
+    assert.equal(normalizeTitle(file), "Gabarito - Lista 1");
+});
+
+test("captura sigla com underscore sem espacos", () => {
+    const file = makeFile("/S02/EA_Eletronica Analogica/2024.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Eletrônica Analógica");
+});
+
+test("infere disciplina em pasta de professor por contexto tecnico", () => {
+    const file = makeFile("/Cadeiras com o Ronaldo/bubblesort.ipynb", "bubblesort.ipynb", "ipynb");
+    assert.equal(inferDisciplina(file), "Pesquisa e Ordenação");
+});
+
 test("filtra imagens de documentacao em src/images", () => {
     const file = makeFile(
         "../IAI - Introducao a Automacao Industrial/src/images/commit.jpg",
