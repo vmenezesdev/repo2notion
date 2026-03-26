@@ -44,6 +44,7 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S06/PEO - Pesquisa e Ordenacao/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Pesquisa e Ordenação");
     assert.equal(inferDisciplina(makeFile("/S08/IC - Inteligencia Computacional/2024.1 - PH/Projeto.pdf", "Projeto.pdf", "pdf")), "Inteligência Computacional");
     assert.equal(inferDisciplina(makeFile("/S05/IAI - Introducao a Automacao Industrial/2023.1 - PH/Relatorio.pdf", "Relatorio.pdf", "pdf")), "Introdução à Automação Industrial");
+    assert.equal(inferDisciplina(makeFile("/S09/EG - Empreendedorismo e Gestao/2024.2 - PH/Projeto.pdf", "Projeto.pdf", "pdf")), "Empreendedorismo e Gestão");
 });
 
 test("ignora pastas genericas na inferencia de disciplina", () => {
@@ -87,7 +88,7 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "PUD Calculo I.doc",
         "doc",
     );
-    assert.equal(normalizeTitle(pudFile), "CA - Plano de Ensino");
+    assert.equal(normalizeTitle(pudFile), "Calculo I - Plano de Ensino");
 
     const provaImagem = makeFile(
         "/S01/CA - Calculo/2018.1 - PH/N2/N2 prova 1.jpeg",
@@ -104,6 +105,15 @@ test("nao interpreta timestamp como parte", () => {
         "jpg",
     );
     assert.equal(normalizeTitle(file), "Cálculo - Prova (2017.1)");
+});
+
+test("nao interpreta sufixo de timestamp em nome de camera como parte", () => {
+    const file = makeFile(
+        "/provas/S01/CA - Calculo I/2026.1 - PH/photo_2026-03-25_14-10-04.jpg",
+        "photo_2026-03-25_14-10-04.jpg",
+        "jpg",
+    );
+    assert.equal(normalizeTitle(file), "Prova - Calculo I - 2026.1 (Imagem)");
 });
 
 test("preserva nome descritivo em imagem de prova", () => {
@@ -324,7 +334,7 @@ test("nao trata pasta de avaliacao como provas para proteus", () => {
 
 test("aceita disciplina em pasta especial sem sigla", () => {
     const file = makeFile("/Cadeiras com o Ronaldo/Lasca Ronaldo.gif", "Lasca Ronaldo.gif", "gif");
-    assert.equal(inferDisciplina(file), "Geral");
+    assert.equal(inferDisciplina(file), "Outros - Prof. Ronaldo Fernandes Ramos");
     const tags = inferTags(file);
     assert.ok(tags.includes("Ronaldo Fernandes Ramos"));
 });
@@ -534,7 +544,30 @@ test("trata readme de raiz e src como ruido", () => {
 
 test("limpa codigos e redundancia em titulo de PUD", () => {
     const file = makeFile("/Documentos/PUDS/S01/CA - Calculo I/1916473-O PUD Calculo I.pdf", "1916473-O PUD Calculo I.pdf", "pdf");
-    assert.equal(normalizeTitle(file), "CA - Plano de Ensino");
+    assert.equal(normalizeTitle(file), "Calculo I - Plano de Ensino");
+});
+
+test("preserva numero significativo apos prefixo numerico de upload", () => {
+    const file = makeFile("/S01/CA - Calculo I/2024.1 - PH/1454722-prova11.jpg", "1454722-prova11.jpg", "jpg");
+    assert.equal(normalizeTitle(file), "Prova 11");
+});
+
+test("mantem codigo quando nome indica projeto em contexto novo", () => {
+    const file = makeFile("/PROJETO-TOP/Entrega Final/projeto_final.py", "projeto_final.py", "py");
+    assert.notEqual(inferMetadata(file, { filterCodeFiles: true }), null);
+});
+
+test("remove tags redundantes quando sigla ja representa disciplina", () => {
+    const tags = inferTags(makeFile("/BEPID-Apple/2014/Projeto 1.docx", "Projeto 1.docx", "docx"));
+    assert.ok(tags.includes("BEPID"));
+    assert.ok(!tags.includes("BEPID Apple"));
+});
+
+test("filtra arquivos de sistema e temporarios do Word", () => {
+    const thumbs = makeFile("/S01/CA - Calculo I/2024.1 - PH/Thumbs.db", "Thumbs.db", "db");
+    const tempWord = makeFile("/S01/CA - Calculo I/2024.1 - PH/~$Prova.docx", "~$Prova.docx", "docx");
+    assert.equal(inferMetadata(thumbs), null);
+    assert.equal(inferMetadata(tempWord), null);
 });
 
 test("preserva ano no inicio de nome de prova", () => {
@@ -568,7 +601,7 @@ test("descarta extensao db_info como ruído", () => {
 
 test("contextualiza titulo generico com professor quando disciplina e geral", () => {
     const file = makeFile("/Cadeiras com o Ronaldo/material.pdf", "material.pdf", "pdf");
-    assert.equal(normalizeTitle(file), "Material - Prof. Ronaldo");
+    assert.equal(normalizeTitle(file), "Outros - Prof. Ronaldo Fernandes Ramos - Material Complementar");
 });
 
 test("usa contexto em imagens genericas de prova", () => {

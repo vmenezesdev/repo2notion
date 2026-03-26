@@ -806,6 +806,14 @@ function isGarbageIdLikeName(nameWithoutExt: string): boolean {
         return false;
     }
 
+    const comparable = normalizeComparable(normalized);
+    const hasAcademicKeyword = /\b(?:prova|avaliac(?:ao|oes)|lista|listagem|exerc(?:icio|icios)|quest(?:ao|oes)|atividade|trabalho|projeto|gabarito|resoluc(?:ao|oes)|pud|plano\s+de\s+ensino|simulado|n[1-4]|av[1-4]|ap[1-4]|p[1-4])\b/.test(comparable);
+    const hasKeywordWithShortNumber = /\b(?:prova|lista|listagem|quest(?:ao|oes)|exerc(?:icio|icios)|atividade|trabalho|projeto|n|av|ap|p)\s*[-_ ]?\d{1,2}\b/.test(comparable);
+    const hasLongNumericPrefixWithMeaningfulTail = /^\d{5,}\s*[-_. ]\s*[a-z]/i.test(comparable) && hasAcademicKeyword;
+    if (hasKeywordWithShortNumber || hasLongNumericPrefixWithMeaningfulTail) {
+        return false;
+    }
+
     if (/^[\d_\-\s]{10,}$/.test(nameWithoutExt)) {
         return true;
     }
@@ -1104,7 +1112,17 @@ function dedupeTagsByContent(tags: string[], protectedTags: string[] = []): stri
                 return false;
             }
             const resolvedDisciplina = resolveDisciplinaBySigla(candidateSigla);
-            return resolvedDisciplina && normalizeComparable(resolvedDisciplina) === current;
+            if (!resolvedDisciplina) {
+                return false;
+            }
+            const normalizedResolved = normalizeComparable(resolvedDisciplina);
+            if (normalizedResolved === current) {
+                return true;
+            }
+            if (current.length < 6) {
+                return false;
+            }
+            return normalizedResolved.startsWith(`${current} `) || current.startsWith(`${normalizedResolved} `);
         });
         if (hasEquivalentSigla) {
             return false;
@@ -1286,7 +1304,13 @@ export function inferMetadata(
         }
     }
 
-    if (shouldFilterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile)) {
+    const normalizedPath = normalizeComparable(normalizedFile.path);
+    const normalizedName = normalizeComparable(normalizedFile.name);
+    const hasProjetoOuTrabalhoHint =
+        /\b(?:projeto|project|trabalho|atividade|lab(?:orat[oó]rio)?)\b/.test(normalizedPath) ||
+        /\b(?:projeto|project|trabalho|atividade|lab(?:orat[oó]rio)?)\b/.test(normalizedName);
+
+    if (shouldFilterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile) && !hasProjetoOuTrabalhoHint) {
         return null;
     }
 
@@ -1323,6 +1347,11 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
             .trim();
         const target = pudSubject || subject;
         const pudSigla = subjectSigla || getResolvedSiglaFromDisciplina(target);
+        const normalizedTarget = normalizeComparable(target);
+        const isCalculoPud = pudSigla === "CA" && normalizedTarget.startsWith("calculo");
+        if (isCalculoPud && target) {
+            return `${normalizeText(target)} - Plano de Ensino`;
+        }
         if (pudSigla) {
             return `${pudSigla} - Plano de Ensino`;
         }
@@ -1422,7 +1451,15 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const assessmentLabel = getAssessmentLabel(nameWithoutExt);
     const explicitPartMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*(\d+)\b/i);
     const shortPartMatch = normalizedName.match(/(?:^|[\s._-])p\s*(\d{1,3})\b/i);
-    const sequentialSuffixMatch = isImage ? nameWithoutExt.match(/[\-_ ](\d{1,3})$/) : null;
+    const isTimestampPattern =
+        /\b(?:19|20)\d{2}[._-]\d{2}[._-]\d{2}(?:[t\s_-]?\d{2}[._:-]\d{2}(?:[._:-]\d{2})?)?\b/i.test(normalizedName) ||
+        /\b(?:19|20)\d{6}(?:[_-]?\d{6})?\b/i.test(normalizedName);
+    const isCameraLikeImageName = /^(?:img|dsc|photo|whatsapp|screenshot|snapshot|scan|captura|pxl)[._\-\s]?\d+/i.test(
+        nameWithoutExt,
+    );
+    const sequentialSuffixMatch = isImage && !isTimestampPattern && !isCameraLikeImageName
+        ? nameWithoutExt.match(/[\-_ ](\d{1,3})$/)
+        : null;
     const sequencePart = sequentialSuffixMatch?.[1] ? String(Number(sequentialSuffixMatch[1])) : "";
     const part = explicitPartMatch?.[1] || (!assessmentLabel ? shortPartMatch?.[1] || "" : "") || sequencePart;
     const isNumericList = tipo === "Lista de Exercícios" && /^lista\s+\d+$/i.test(cleanedName);
@@ -1572,7 +1609,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         }
 
         const gradeMatch = normalizedName.match(/\bn\s*([1-4])\b/i);
-        const provaNumberMatch = normalizedName.match(/\b(?:prova|avaliacao|av|ap|p)\s*([1-4])\b/i);
+        const provaNumberMatch = normalizedName.match(/\b(?:prova|avaliacao|av|ap|p)\s*([1-9]\d?)\b/i);
         const explicitPart = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg)\s*(\d+)\b/i)?.[1];
         const sequentialPart = normalizedName.match(/\bn\s*[1-4]\D+(\d+)\b/i)?.[1];
         const part = explicitPart || sequentialPart;
@@ -1871,6 +1908,11 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         return inferredFromRepoRoot;
     }
 
+    const professor = inferProfessorFromPath(path);
+    if (professor) {
+        return `Outros - Prof. ${professor}`;
+    }
+
     return "Geral";
 }
 
@@ -2105,5 +2147,5 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
     const semanticallyDedupedTags = shouldDropDisciplinaTag
         ? cleanedTags.filter((tag) => normalizeComparable(tag) !== normalizedDisciplina)
         : cleanedTags;
-    return dedupeTagsByContent(semanticallyDedupedTags, [resolvedSigla]);
+    return dedupeTagsByContent(semanticallyDedupedTags, [resolvedSigla, ...KNOWN_PROFESSORS]);
 }
