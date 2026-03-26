@@ -471,18 +471,13 @@ function getAssessmentLabel(nameWithoutExt: string): string {
  * ```
  */
 export function inferMetadata(
-    file: RepoFile | null | undefined,
-    options: { filterCodeFiles: boolean } = { filterCodeFiles: true }
+    file: RepoFile | null | undefined
 ): RecordCandidate | null {
     if (!file) {
         return null;
     }
 
     if (isNoiseFile(file)) {
-        return null;
-    }
-
-    if (options.filterCodeFiles && isCodeFile(file) && !isTechnicalContext(file)) {
         return null;
     }
 
