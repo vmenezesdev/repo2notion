@@ -49,10 +49,13 @@ const SEMESTER_REGEXES = [
 const YEAR_REGEX = /\b((?:19|20)\d{2})\b/;
 
 const DISCIPLINA_BY_SIGLA: Record<string, string> = {
+    AC: "Arquitetura de Computadores",
     CA: "Cálculo",
     CALC: "Cálculo",
+    CE: "Circuitos Eletrônicos",
     ED: "Eletrônica Digital",
     ELETRODIG: "Eletrônica Digital",
+    GAA: "Geometria Analítica e Álgebra Linear",
     LM: "Lógica Matemática",
     EDA: "Estrutura de Dados",
     ED1: "Estrutura de Dados",
@@ -71,9 +74,14 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     ENGSOFT: "Engenharia de Software",
     ES: "Engenharia de Software",
     FE: "Física",
+    GR: "Grafos",
     IP: "Introdução à Programação",
+    LI: "Libras",
     PE: "Probabilidade e Estatística",
+    CN: "Cálculo Numérico",
+    PP: "Paradigmas de Programação",
     PSI: "Projeto de Sistemas de Informação",
+    SL: "Sistemas Lineares",
     STR: "Sistemas de Tempo Real",
     PPD: "Programação Paralela e Distribuída",
     EG: "Empreendedorismo e Gestão",
@@ -475,24 +483,36 @@ function getAssessmentLabel(nameWithoutExt: string): string {
  * ```
  */
 export function inferMetadata(
-    file: RepoFile | null | undefined
+    file: RepoFile | null | undefined,
+    options?: { filterCodeFiles?: boolean }
 ): RecordCandidate | null {
     if (!file) {
         return null;
     }
 
-    if (isNoiseFile(file)) {
+    const normalizedFile: RepoFile = {
+        ...file,
+        path: normalizePath(file.path),
+        name: safeString(file.name),
+        extension: safeString(file.extension),
+    };
+
+    if (isNoiseFile(normalizedFile)) {
         return null;
     }
 
-    const sourcePath = normalizePath(file.path);
+    if (options?.filterCodeFiles && isCodeFile(normalizedFile) && !isTechnicalContext(normalizedFile)) {
+        return null;
+    }
+
+    const sourcePath = normalizedFile.path;
 
     return {
-        title: normalizeTitle(file),
-        tipo: inferTipo(file),
-        disciplina: inferDisciplina(file),
-        semester: inferSemester(file),
-        tags: inferTags(file),
+        title: normalizeTitle(normalizedFile),
+        tipo: inferTipo(normalizedFile),
+        disciplina: inferDisciplina(normalizedFile),
+        semester: inferSemester(normalizedFile),
+        tags: inferTags(normalizedFile),
         sourcePath,
     };
 }
@@ -538,10 +558,10 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     }
 
     const normalizedName = normalizeComparable(nameWithoutExt);
+    const assessmentLabel = getAssessmentLabel(nameWithoutExt);
     const explicitPartMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*(\d+)\b/i);
-    const shortPartMatch = normalizedName.match(/\bp\s*(\d+)\b/i);
-    const shortPartNumber = shortPartMatch ? Number.parseInt(shortPartMatch[1], 10) : Number.NaN;
-    const part = explicitPartMatch?.[1] ?? (Number.isFinite(shortPartNumber) && shortPartNumber > 4 ? shortPartMatch?.[1] : "");
+    const shortPartMatch = normalizedName.match(/(?:^|[\s._-])p\s*(\d{1,3})\b/i);
+    const part = explicitPartMatch?.[1] ?? (!assessmentLabel ? shortPartMatch?.[1] : "");
     const isNumericList = tipo === "Lista de Exercícios" && /^lista\s+\d+$/i.test(cleanedName);
 
     if (part && !isNumericList) {
@@ -568,6 +588,35 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
 
     if (tipo === "Prova" && isImage) {
+        const genericImageTokens = new Set([
+            "prova",
+            "p",
+            "avaliacao",
+            "av",
+            "ap",
+            "n1",
+            "n2",
+            "n3",
+            "n4",
+            "af",
+            "final",
+            "parte",
+            "pt",
+            "pag",
+            "pagina",
+            "pg",
+        ]);
+        const meaningfulTokens = normalizeComparable(cleanedName)
+            .split(/\s+/)
+            .filter(Boolean)
+            .filter((token) => !genericImageTokens.has(token))
+            .filter((token) => !/^\d+$/.test(token))
+            .filter((token) => !/^(?:n|av|ap|p)[1-4]$/.test(token));
+
+        if (meaningfulTokens.length > 0) {
+            return cleanedName;
+        }
+
         const gradeMatch = normalizedName.match(/\bn\s*([1-4])\b/i);
         const explicitPart = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|pg)\s*(\d+)\b/i)?.[1];
         const sequentialPart = normalizedName.match(/\bn\s*[1-4]\D+(\d+)\b/i)?.[1];
@@ -579,7 +628,6 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
         return base;
     }
 
-    const assessmentLabel = getAssessmentLabel(nameWithoutExt);
     if (semester && assessmentLabel) {
         if (subjectSigla) {
             return `${subjectSigla} - ${assessmentLabel} - ${semester}`;
@@ -621,7 +669,7 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     }
 
     if (isPlanoDeEnsino) {
-        return "Prova";
+        return "Plano de Ensino";
     }
 
     if (isLista) {
@@ -690,7 +738,30 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         return part;
     }
 
+    const inferredFromFileName = inferDisciplinaFromFileName(file?.name);
+    if (inferredFromFileName) {
+        return inferredFromFileName;
+    }
+
     return "Geral";
+}
+
+function inferDisciplinaFromFileName(fileName: unknown): string {
+    const raw = fixMojibake(safeString(fileName).replace(/\.[^/.]+$/, "")).trim();
+    if (!raw) {
+        return "";
+    }
+
+    const normalized = normalizeText(raw);
+    const match = normalized.match(/^(?:pud|plano\s+de\s+ensino)\s*[-–—:]?\s*(.+)$/i);
+    if (!match?.[1]) {
+        return "";
+    }
+
+    return match[1]
+        .replace(/\s*[-–—:]?\s*(?:\d{4}(?:[._\-\s]?[12])?)$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 export function inferSemester(file: RepoFile | null | undefined): string {

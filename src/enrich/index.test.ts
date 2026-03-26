@@ -24,6 +24,9 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S02/EA - Eletronica Analogica/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Eletrônica Analógica");
     assert.equal(inferDisciplina(makeFile("/S06/RCC - Redes/2020.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Redes de Computadores");
     assert.equal(inferDisciplina(makeFile("/S06/SE - Sistemas Embarcados/2020.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Sistemas Embarcados");
+    assert.equal(inferDisciplina(makeFile("/S03/AC - Arquitetura de Computadores/2018.1 - PH/AP1.pdf", "AP1.pdf", "pdf")), "Arquitetura de Computadores");
+    assert.equal(inferDisciplina(makeFile("/S02/CN - Calculo Numerico/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Cálculo Numérico");
+    assert.equal(inferDisciplina(makeFile("/S02/GR - Grafos/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Grafos");
 });
 
 test("ignora pastas genericas na inferencia de disciplina", () => {
@@ -33,6 +36,15 @@ test("ignora pastas genericas na inferencia de disciplina", () => {
         "doc",
     );
     assert.equal(inferDisciplina(file), "Cálculo");
+});
+
+test("extrai disciplina do nome do arquivo em pastas PUDS genericas", () => {
+    const file = makeFile(
+        "/Documentos/PUDS/S01/PUD Calculo I.doc",
+        "PUD Calculo I.doc",
+        "doc",
+    );
+    assert.equal(inferDisciplina(file), "Calculo I");
 });
 
 test("ignora pasta relativa em subpastas de documentos", () => {
@@ -66,6 +78,24 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "jpeg",
     );
     assert.equal(normalizeTitle(provaImagem), "Prova N2 (Parte 1)");
+});
+
+test("nao interpreta timestamp como parte", () => {
+    const file = makeFile(
+        "/provas/S01/CA - Calculo/2017.1 - PH/P_20170530_141545.jpg",
+        "P_20170530_141545.jpg",
+        "jpg",
+    );
+    assert.equal(normalizeTitle(file), "Prova");
+});
+
+test("preserva nome descritivo em imagem de prova", () => {
+    const file = makeFile(
+        "/provas/S01/CA - Calculo/2018.1 - PH/Lasca Ronaldo.gif",
+        "Lasca Ronaldo.gif",
+        "gif",
+    );
+    assert.equal(normalizeTitle(file), "Lasca Ronaldo");
 });
 
 test("limpa titulo tecnico de hardware com extensao encadeada", () => {
@@ -159,13 +189,24 @@ test("classifica extensoes de quartus como hardware e simulacao", () => {
     assert.ok(tags.includes("Quartus"));
 });
 
-test("mantem compatibilidade de pud como tipo prova", () => {
+test("classifica pud como plano de ensino", () => {
     const pudFile = makeFile(
         "/Documentos/PUDS/S01/CA - Calculo I/2018.1 - PH/PUD Calculo I.doc",
         "PUD Calculo I.doc",
         "doc",
     );
-    assert.equal(inferTipo(pudFile), "Prova");
+    assert.equal(inferTipo(pudFile), "Plano de Ensino");
+});
+
+test("normaliza path com barras duplas em inferMetadata", () => {
+    const file = makeFile(
+        "../provas//S01/CA - Calculo/2018.1 - PH/AP1.pdf",
+        "AP1.pdf",
+        "pdf",
+    );
+    const metadata = inferMetadata(file);
+    assert.notEqual(metadata, null);
+    assert.equal(metadata?.sourcePath, "../provas/S01/CA - Calculo/2018.1 - PH/AP1.pdf");
 });
 
 test("adiciona tag projeto para arquivos de proteus", () => {
