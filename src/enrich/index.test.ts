@@ -20,8 +20,12 @@ function makeFile(path: string, name: string, extension: string): RepoFile {
 }
 
 test("expande dicionario de siglas", () => {
+    assert.equal(inferDisciplina(makeFile("/S03/IAA - Introducao a Analise de Algoritmos/2018.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Introdução à Análise de Algoritmos");
+    assert.equal(inferDisciplina(makeFile("/S02/IN - Instrumentacao/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Instrumentação");
+    assert.equal(inferDisciplina(makeFile("/S01/EF - Etica e Filosofia/2018.2 - PH/Resumo.pdf", "Resumo.pdf", "pdf")), "Ética e Filosofia");
     assert.equal(inferDisciplina(makeFile("/S03/EDO - Equacoes Diferenciais/2018.1 - PH/AP1.pdf", "AP1.pdf", "pdf")), "Equações Diferenciais");
     assert.equal(inferDisciplina(makeFile("/S02/EA - Eletronica Analogica/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Eletrônica Analógica");
+    assert.equal(inferDisciplina(makeFile("/S06/SEMBS - Sistemas Embarcados/2020.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Sistemas Embarcados");
     assert.equal(inferDisciplina(makeFile("/S06/RCC - Redes/2020.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Redes de Computadores");
     assert.equal(inferDisciplina(makeFile("/S06/SE - Sistemas Embarcados/2020.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Sistemas Embarcados");
     assert.equal(inferDisciplina(makeFile("/S03/AC - Arquitetura de Computadores/2018.1 - PH/AP1.pdf", "AP1.pdf", "pdf")), "Arquitetura de Computadores");
@@ -203,6 +207,13 @@ test("classifica pdsbak como hardware e proteus", () => {
     const tags = inferTags(file);
     assert.ok(tags.includes("Hardware"));
     assert.ok(tags.includes("Proteus"));
+    assert.ok(tags.includes("Simulação"));
+});
+
+test("classifica fig como simulacao", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/lab_01.fig", "lab_01.fig", "fig");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("Simulação"));
 });
 
 test("classifica extensoes de quartus como hardware e simulacao", () => {
@@ -253,9 +264,29 @@ test("prioriza tipo prova para proteus em contexto de avaliacao", () => {
 
 test("aceita disciplina em pasta especial sem sigla", () => {
     const file = makeFile("/Cadeiras com o Ronaldo/Lasca Ronaldo.gif", "Lasca Ronaldo.gif", "gif");
-    assert.equal(inferDisciplina(file), "Cadeiras com o Ronaldo");
+    assert.equal(inferDisciplina(file), "Geral");
     const tags = inferTags(file);
-    assert.ok(tags.includes("Cadeiras com o Ronaldo"));
+    assert.ok(tags.includes("Ronaldo Fernandes Ramos"));
+});
+
+test("classifica listagem, resolvidos e pratica", () => {
+    const listagem = makeFile("/S01/CA - Calculo/2018.1 - Fernando Macedo/2a_listagem.pdf", "2a_listagem.pdf", "pdf");
+    const resolvidos = makeFile("/S01/CA - Calculo/2018.1 - Fernando Macedo/Exercicios resolvidos.pdf", "Exercicios resolvidos.pdf", "pdf");
+    const pratica = makeFile("/S05/SO - Sistemas Operacionais/2019.1 - Roberto Carlos/Pratica 1.pdf", "Pratica 1.pdf", "pdf");
+
+    assert.equal(inferTipo(listagem), "Lista de Exercícios");
+    assert.equal(inferTipo(resolvidos), "Gabarito/Resolução");
+    assert.equal(inferTipo(pratica), "Trabalho/Projeto");
+});
+
+test("normaliza professor canonico novo", () => {
+    const tags = inferTags(makeFile("/S01/CA - Calculo/2018.1 - Fernando Macedo/AP1.pdf", "AP1.pdf", "pdf"));
+    assert.ok(tags.includes("Fernando Macedo"));
+});
+
+test("remove prefixo numerico de ordenacao no titulo", () => {
+    const file = makeFile("/S01/ED - Eletronica Digital/2018.1 - PH/1 - PRATICA_DE_ELETRONICA_DIGITAL_II.pdf", "1 - PRATICA_DE_ELETRONICA_DIGITAL_II.pdf", "pdf");
+    assert.equal(normalizeTitle(file), "PRATICA DE ELETRONICA DIGITAL II");
 });
 
 test("nao usa pasta raiz provas para classificar tudo como prova", () => {

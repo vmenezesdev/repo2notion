@@ -74,6 +74,8 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     MD: "Matemática Discreta",
     ATC: "Aspectos Teóricos da Computação",
     IAI: "Automação Industrial",
+    IAA: "Introdução à Análise de Algoritmos",
+    IN: "Instrumentação",
     POO: "Programação Orientada a Objetos",
     LP: "Linguagem de Programação",
     SO: "Sistemas Operacionais",
@@ -102,7 +104,9 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     IHC: "Interação Humano Computador",
     PDI: "Processamento Digital de Imagens",
     SE: "Sistemas Embarcados",
+    SEMBS: "Sistemas Embarcados",
     EDO: "Equações Diferenciais",
+    EF: "Ética e Filosofia",
     EA: "Eletrônica Analógica",
     EI: "Eletrônica Industrial",
     MI: "Microcontroladores e Microprocessadores",
@@ -119,6 +123,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
 const DISCIPLINA_BY_SIGLA_AND_SEMESTER: Record<string, Record<number, string>> = {
     ED: {
         1: "Eletrônica Digital",
+        2: "Eletrônica Digital",
         3: "Estrutura de Dados",
     },
 };
@@ -133,6 +138,7 @@ const IGNORED_SUBJECT_FOLDERS = new Set([
     "pics",
     "material",
     "outros",
+    "cadeiras com o ronaldo",
     "..",
 ]);
 
@@ -144,7 +150,7 @@ const TIPO_PATTERNS = {
         /(\/|\b)(provas?|avaliac(?:oes|o(?:es)?)|simulados?)(\/|\b)/i,
     ],
     lista: [
-        /(^|\b)(lista|exerc[ií]c(?:io|ios)?|folha\s*de\s*exerc[ií]cios?|td)(\b|$)/i,
+        /(^|\b)(lista|listagem|exerc[ií]c(?:io|ios)?|folha\s*de\s*exerc[ií]cios?|td|exerc)(\b|$)/i,
         /(^|\b)(assignment|homework|problem\s*set)(\b|$)/i,
         /(\/|\b)(listas?|exercicios?|tutoriais?)(\/|\b)/i,
     ],
@@ -153,7 +159,7 @@ const TIPO_PATTERNS = {
         /(\/|\b)(aulas?|slides?|material(?:\s*de)?\s*apoio|monitoria)(\/|\b)/i,
     ],
     projeto: [
-        /(^|\b)(trabalho|projeto(?:\s*final)?|semin[aá]rio|relat[oó]rio|lab(?:orat[oó]rio)?)(\b|$)/i,
+        /(^|\b)(trabalho|projeto(?:\s*final)?|semin[aá]rio|relat[oó]rio|lab(?:orat[oó]rio)?|pr[aá]tica)(\b|$)/i,
         /(\/|\b)(trabalhos?|projetos?|labs?|laboratorios?)(\/|\b)/i,
     ],
     resumo: [
@@ -168,7 +174,7 @@ const TIPO_PATTERNS = {
         /(\/|\b)(est[aá]gio|estagio|administrativo|secretaria)(\/|\b)/i,
     ],
     gabaritoResolucao: [
-        /(^|\b)(gabarito|resolu[cç][aã]o|solu[cç][aã]o|answer\s*key|solution)(\b|$)/i,
+        /(^|\b)(gabarito|resolu[cç][aã]o|solu[cç][aã]o|answer\s*key|solution|resolvidos)(\b|$)/i,
     ],
 };
 
@@ -217,6 +223,18 @@ const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     NIDIA: "Nídia Glória da Silva Campos",
     "PAULO REGIS": "Paulo Régis Carneiro de Araújo",
     RONALDO: "Ronaldo Fernandes Ramos",
+    "FERNANDO MACEDO": "Fernando Macedo",
+    "ROBERTO CARLOS": "Roberto Carlos",
+    "MARIA EUGENIA": "Maria Eugênia",
+    MURILO: "Murilo",
+    "HUGO VICTOR": "Hugo Victor",
+    "SEBASTIAO PONTES": "Sebastião Pontes",
+    "LUCAS SOUSA": "Lucas Sousa",
+    "LUCAS MOURA": "Lucas Moura",
+    NARCELIO: "Narcélio Pinto",
+    "ALUISIO CABRAL": "Aluísio Cabral",
+    "JOSE CARNEIRO": "José Carneiro",
+    "JOSÉ CARNEIRO": "José Carneiro",
     PH: "Paulo Henrique",
     JOACILO: "Joacilo",
     JOACILLO: "Joacilo",
@@ -728,6 +746,7 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     let cleanedName = normalizeText(nameWithoutExt)
         .replace(/^\d{5,}[-_\s]*/, "")
         .replace(/^\d{5,}(?=[A-Za-z])/, "")
+        .replace(/^(?:\d+\s*[-–—]\s*)/, "")
         .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
         .replace(/^\s*(?:PUD|Plano\s+de\s+Ensino)\b\s*/gi, "")
         .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
@@ -1064,7 +1083,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add(extensionTag);
     }
 
-    if (["dsn", "pdsprj", "pdsit", "m", "bdf", "bsf", "vpr", "sof", "pof"].includes(extension)) {
+    if (["dsn", "pdsprj", "pdsit", "pdsbak", "m", "fig", "bdf", "bsf", "vpr", "sof", "pof"].includes(extension)) {
         tags.add("Simulação");
     }
 
@@ -1110,6 +1129,35 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         const normalizedProfessorTag = normalizeProfessorName(profName);
         if (normalizedProfessorTag.length >= 2 && /[A-Z]/.test(normalizedProfessorTag)) {
             tags.add(normalizedProfessorTag);
+        }
+    }
+
+    if (!profName) {
+        for (const part of pathParts) {
+            const normalizedPart = normalizeText(part);
+            if (!normalizedPart) {
+                continue;
+            }
+            const comparablePartUpper = normalizeComparable(part).toUpperCase();
+            let aliasMatch = "";
+            for (const [alias, canonical] of PROFESSOR_CANONICAL_MAP.entries()) {
+                if (alias.length >= 3 && comparablePartUpper.includes(alias)) {
+                    aliasMatch = canonical;
+                    break;
+                }
+            }
+            if (aliasMatch) {
+                tags.add(aliasMatch);
+                break;
+            }
+            const normalizedProfessorTag = normalizeProfessorName(part);
+            if (!normalizedProfessorTag || normalizedProfessorTag === normalizedPart.toUpperCase()) {
+                continue;
+            }
+            if (normalizedProfessorTag.length >= 2 && /[A-Z]/.test(normalizedProfessorTag)) {
+                tags.add(normalizedProfessorTag);
+                break;
+            }
         }
     }
 
