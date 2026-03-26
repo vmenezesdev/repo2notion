@@ -39,9 +39,11 @@ const NOISE_EXTENSIONS = new Set([
 ]);
 
 const SEMESTER_REGEXES = [
-    /\b((?:19|20)\d{2})[._\-\s]([12])\b/g,
-    /\b((?:19|20)\d{2})([12])\b/g,
+    /\b((?:19|20)\d{2})[._\-\s]([12])\b/,
+    /\b((?:19|20)\d{2})([12])\b/,
 ];
+
+const YEAR_REGEX = /\b((?:19|20)\d{2})\b/;
 
 const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     CA: "Cálculo",
@@ -59,6 +61,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     SO: "Sistemas Operacionais",
     SD: "Sistemas Distribuídos",
     RC: "Redes de Computadores",
+    RCC: "Redes de Computadores",
     BD: "Banco de Dados",
     IA: "Inteligência Artificial",
     CG: "Computação Gráfica",
@@ -72,6 +75,11 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     PPD: "Programação Paralela e Distribuída",
     EG: "Empreendedorismo e Gestão",
     VC: "Visão Computacional",
+    EDO: "Equações Diferenciais",
+    EA: "Eletrônica Analógica",
+    MI: "Microcontroladores e Microprocessadores",
+    GP: "Gerenciamento de Projetos",
+    SM: "Sistemas Multimídia",
     PT: "Produção Textual",
     TCC: "Trabalho de Conclusão de Curso",
     BEPID: "BEPID Apple",
@@ -107,6 +115,8 @@ const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monito
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
+const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "hex", "cof"]);
+const TECHNICAL_SIGLAS = new Set(["ED", "EA", "MI", "SE", "IAI", "STR", "RC", "RCC", "SD", "SM"]);
 
 const TAG_BY_EXTENSION: Record<string, string> = {
     c: "C",
@@ -204,7 +214,11 @@ function fixMojibake(value: unknown): string {
         [/Ã‡/g, "Ç"],
         [/Ã_n/g, "ún"],
         [/Ã_o/g, "ão"],
-        [/Ã_/g, "ç"],
+        [/Ã_/g, "í"],
+        [/Ã\^/g, "ê"],
+        [/Ã\?/g, "ó"],
+        [/Ã\(/g, "ç"],
+        [/Ã\$/g, "ú"],
         [/Ã(?=[\s])/g, "ã"],
         [/Âº/g, "º"],
         [/Âª/g, "ª"],
@@ -240,11 +254,15 @@ function getSemesterFromText(value: unknown): string {
     const text = normalizeComparable(value);
 
     for (const regex of SEMESTER_REGEXES) {
-        regex.lastIndex = 0;
         const match = regex.exec(text);
         if (match) {
             return `${match[1]}.${match[2]}`;
         }
+    }
+
+    const yearMatch = text.match(YEAR_REGEX);
+    if (yearMatch) {
+        return yearMatch[1];
     }
 
     return "";
@@ -297,6 +315,17 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     return { sigla, name };
+}
+
+function getSubjectSigla(file: RepoFile | null | undefined): string {
+    const subjectPart = getSubjectPart(normalizePath(file?.path));
+    const { sigla } = getSiglaAndName(subjectPart);
+    return sigla;
+}
+
+function isTechnicalContext(file: RepoFile | null | undefined): boolean {
+    const sigla = getSubjectSigla(file);
+    return TECHNICAL_SIGLAS.has(sigla);
 }
 
 function isNoiseFile(file: RepoFile | null | undefined): boolean {
@@ -384,7 +413,7 @@ export function inferMetadata(
         return null;
     }
 
-    if (options.filterCodeFiles && isCodeFile(file)) {
+    if (options.filterCodeFiles && isCodeFile(file) && !isTechnicalContext(file)) {
         return null;
     }
 
@@ -402,12 +431,13 @@ export function inferMetadata(
 
 export function normalizeTitle(file: RepoFile | null | undefined): string {
     const semester = inferSemester(file);
+    const subjectSigla = getSubjectSigla(file);
     const originalName = safeString(file?.name);
     const nameWithoutExt = fixMojibake(originalName.replace(/\.[^/.]+$/, ""));
     let cleanedName = normalizeText(nameWithoutExt)
         .replace(/^\d{5,}[-_\s]*/, "")
         .replace(/\b(?:pdf|docx?|pptx?|xlsx?|jpe?g|png|txt|zip|rar|7z)\b/gi, "")
-        .replace(/^\s*(PUD|AV\d?|AP\d?|AVALIACAO|AVALIAÇÃO|PROVA|LISTA)\b\s*/gi, "")
+        .replace(/^\s*(PUD)\b\s*/gi, "")
         .replace(/^(?:\d+[)\]]\s*|\d+(?:[.\-_]\d+)+[.\-_]?\s*|\d+[.\-_]\s*)/, "")
         .replace(/[._\-]/g, " ")
         .replace(/\s*\(\s*(?:copia|copy)\s*\d*\s*\)\s*$/i, "")
@@ -420,13 +450,11 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
 
     cleanedName = cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1);
 
-    const assessmentLabel = getAssessmentLabel(cleanedName);
-    if (
-        semester &&
-        assessmentLabel &&
-        (normalizeComparable(cleanedName) === normalizeComparable(assessmentLabel) ||
-            normalizeComparable(cleanedName).startsWith(normalizeComparable(assessmentLabel) + " "))
-    ) {
+    const assessmentLabel = getAssessmentLabel(nameWithoutExt);
+    if (semester && assessmentLabel) {
+        if (subjectSigla) {
+            return `${subjectSigla} - ${assessmentLabel} - ${semester}`;
+        }
         return `${assessmentLabel} - ${semester}`;
     }
 
@@ -449,16 +477,19 @@ export function inferTipo(file: RepoFile | null | undefined): string {
     const isPlanoDeEnsino = /\bpud\b/i.test(name) || /\bpud\b/i.test(path);
     const isProvasFolder = /(^|\/)provas?(\/|$)/i.test(path);
 
-    if (isProva && isProvasFolder) {
-        return "Prova";
-    }
-
-    if (isProva && IMAGE_EXTENSIONS.has(extension)) {
+    if (isProva || isProvasFolder) {
         return "Prova";
     }
 
     if (isPlanoDeEnsino) {
         return "Plano de Ensino";
+    }
+
+    if (
+        TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(path)) ||
+        ["py", "c", "java", "pdsprj", "dsn", "cpp", "js", "ts", "hex", "cof", "asm"].includes(extension)
+    ) {
+        return "Trabalho/Projeto";
     }
 
     if (isLista) {
@@ -473,16 +504,8 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Documentação";
     }
 
-    if (TIPO_PATTERNS.projeto.some((pattern) => pattern.test(name) || pattern.test(path)) || ["py", "c", "java", "pdsprj", "dsn", "cpp", "js", "ts"].includes(extension)) {
-        return "Trabalho/Projeto";
-    }
-
     if (isResumo) {
         return "Resumo";
-    }
-
-    if (isProva) {
-        return "Prova";
     }
 
     if (IMAGE_EXTENSIONS.has(extension)) {
@@ -504,7 +527,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         return fixMojibake(name);
     }
 
-    return fixMojibake(subjectPart);
+    return fixMojibake(subjectPart || "Geral");
 }
 
 export function inferSemester(file: RepoFile | null | undefined): string {
@@ -554,14 +577,14 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add("Simulação");
     }
 
-    if (["dsn", "pdsprj"].includes(extension)) {
+    if (HARDWARE_EXTENSIONS.has(extension)) {
         tags.add("Hardware");
     }
 
     const professorMatch = fixMojibake(normalizedPath).match(/\d{4}[._\-\s]?[12]\s*-\s*([^/]+)/i);
     if (professorMatch) {
         const profName = professorMatch[1].trim();
-        if (profName.length > 3) {
+        if (profName.length >= 2 && /[A-Za-z]/.test(profName)) {
             tags.add(profName);
         }
     }
