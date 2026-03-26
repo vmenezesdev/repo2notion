@@ -115,6 +115,11 @@ test("captura rotulos de avaliacao com parcial e nota decimal", () => {
 
     const decimal = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/N1.2.pdf", "N1.2.pdf", "pdf"));
     assert.ok(decimal.includes("N1.2"));
+    assert.ok(decimal.includes("N1"));
+
+    const decimalAv = inferTags(makeFile("/S06/SD - Sistemas Distribuidos/2021.1 - PH/AP1.2.pdf", "AP1.2.pdf", "pdf"));
+    assert.ok(decimalAv.includes("AV1.2"));
+    assert.ok(decimalAv.includes("AV1"));
 
     const af = inferTags(makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AF Ultimate.pdf", "AF Ultimate.pdf", "pdf"));
     assert.ok(af.includes("AF"));
@@ -168,6 +173,8 @@ test("prioriza tipo prova para proteus em contexto de avaliacao", () => {
 test("aceita disciplina em pasta especial sem sigla", () => {
     const file = makeFile("/Cadeiras com o Ronaldo/Lasca Ronaldo.gif", "Lasca Ronaldo.gif", "gif");
     assert.equal(inferDisciplina(file), "Cadeiras com o Ronaldo");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("CADEIRASCOMORONALDO"));
 });
 
 test("interpreta pasta com sigla sem espacos no hifen", () => {
@@ -179,6 +186,12 @@ test("nao filtra codigo em disciplinas tecnicas", () => {
     const technicalCode = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/main.c", "main.c", "c");
     const metadata = inferMetadata(technicalCode, { filterCodeFiles: true });
     assert.notEqual(metadata, null);
+
+    const ipCode = makeFile("/S01/IP - Introducao a Programacao/2022.1 - PH/main.c", "main.c", "c");
+    assert.notEqual(inferMetadata(ipCode, { filterCodeFiles: true }), null);
+
+    const edaCode = makeFile("/S03/EDA - Estrutura de Dados/2022.1 - PH/arvore.c", "arvore.c", "c");
+    assert.notEqual(inferMetadata(edaCode, { filterCodeFiles: true }), null);
 });
 
 test("mantem filtro de codigo em contexto nao tecnico", () => {

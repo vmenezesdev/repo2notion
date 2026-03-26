@@ -134,7 +134,26 @@ const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "s
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
 const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof"]);
-const TECHNICAL_SIGLAS = new Set(["ED", "EA", "MI", "SE", "IAI", "STR", "RC", "RCC", "SD", "SM"]);
+const TECHNICAL_SIGLAS = new Set([
+    "ED",
+    "EA",
+    "MI",
+    "SE",
+    "IAI",
+    "STR",
+    "RC",
+    "RCC",
+    "SD",
+    "SM",
+    "IP",
+    "EDA",
+    "POO",
+    "PPD",
+    "IA",
+    "ATC",
+    "BD",
+    "LP",
+]);
 
 const TAG_BY_EXTENSION: Record<string, string> = {
     c: "C",
@@ -400,9 +419,13 @@ function getAssessmentLabel(nameWithoutExt: string): string {
         return `AV${partialMatch[1]}`;
     }
 
-    const decimalGradeMatch = text.match(/\bn\s*([1-4])(?:[._-]\s*(\d+))\b/i);
+    const decimalGradeMatch = text.match(/\b(ap|av|p|n)\s*([1-4])(?:[._-]\s*(\d+))\b/i);
     if (decimalGradeMatch) {
-        return `N${decimalGradeMatch[1]}.${decimalGradeMatch[2]}`;
+        const prefix = decimalGradeMatch[1].toUpperCase();
+        if (prefix === "N") {
+            return `N${decimalGradeMatch[2]}.${decimalGradeMatch[3]}`;
+        }
+        return `AV${decimalGradeMatch[2]}.${decimalGradeMatch[3]}`;
     }
 
     const compactMatch = text.match(/\b(ap|av|p|n)\s*(\d)\b/i);
@@ -695,6 +718,9 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         const provaTag = getAssessmentLabel(fileName.replace(/\.[^/.]+$/, ""));
         if (provaTag) {
             tags.add(provaTag);
+            if (provaTag.includes(".")) {
+                tags.add(provaTag.split(".")[0]);
+            }
         }
     }
 
