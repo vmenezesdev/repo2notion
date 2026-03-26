@@ -279,6 +279,7 @@ const TECHNICAL_SIGLAS = new Set([
     "CN",
     "GAA",
 ]);
+const NON_TECHNICAL_SIGLAS = new Set(["PT", "LI", "EF", "PS", "MCT"]);
 
 const PROFESSOR_CANONICAL_MAP_RAW: Record<string, string> = {
     JB: "João Batista Bezerra Frota",
@@ -742,7 +743,7 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
     }
 
     const normalizedSubject = fixMojibake(subjectPart).trim();
-    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*-\s*(.+)$/);
+    const compactSiglaMatch = normalizedSubject.match(/^\s*([A-Za-z]{2,10})\s*[-–—]\s*(.+)$/);
     if (compactSiglaMatch) {
         return {
             sigla: normalizeSigla(compactSiglaMatch[1]),
@@ -750,7 +751,7 @@ function getSiglaAndName(subjectPart: string): { sigla: string; name: string } {
         };
     }
 
-    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s-\s/);
+    const [siglaRaw, ...nameParts] = normalizedSubject.split(/\s*[-–—]\s*/);
     const sigla = normalizeSigla(siglaRaw ?? "");
     const name = nameParts.join(" - ").trim();
 
@@ -873,7 +874,7 @@ function inferImageTitleFromIgnoredFolderContext(file: RepoFile | null | undefin
         return `${disciplina} - Questão ${questionMatch[1]}${suffix}`;
     }
 
-    if (disciplina) {
+    if (disciplina && isGenericCaptureName) {
         const suffix = semester ? ` (${semester})` : "";
         return `${disciplina} - Imagem${suffix}`;
     }
@@ -920,7 +921,16 @@ function dedupeTagsByContent(tags: string[], protectedTags: string[] = []): stri
 
 function isTechnicalContext(file: RepoFile | null | undefined): boolean {
     const sigla = getSubjectSigla(file);
-    return TECHNICAL_SIGLAS.has(sigla);
+    if (!sigla) {
+        return false;
+    }
+    if (TECHNICAL_SIGLAS.has(sigla)) {
+        return true;
+    }
+    if (DISCIPLINA_BY_SIGLA[sigla]) {
+        return !NON_TECHNICAL_SIGLAS.has(sigla);
+    }
+    return false;
 }
 
 function isNoiseFile(file: RepoFile | null | undefined): boolean {
@@ -1142,25 +1152,39 @@ export function normalizeTitle(file: RepoFile | null | undefined): string {
     const assessmentLabel = getAssessmentLabel(nameWithoutExt);
     const explicitPartMatch = normalizedName.match(/\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*(\d+)\b/i);
     const shortPartMatch = normalizedName.match(/(?:^|[\s._-])p\s*(\d{1,3})\b/i);
-    const sequentialSuffixMatch = isImage ? nameWithoutExt.match(/[\-_](\d{1,3})$/) : null;
+    const sequentialSuffixMatch = isImage ? nameWithoutExt.match(/[\-_ ](\d{1,3})$/) : null;
     const sequencePart = sequentialSuffixMatch?.[1] ? String(Number(sequentialSuffixMatch[1])) : "";
     const part = explicitPartMatch?.[1] || (!assessmentLabel ? shortPartMatch?.[1] || "" : "") || sequencePart;
     const isNumericList = tipo === "Lista de Exercícios" && /^lista\s+\d+$/i.test(cleanedName);
+    const usesSequenceOnlyPart = Boolean(sequencePart && part === sequencePart && !explicitPartMatch && !shortPartMatch?.[1]);
 
     if (part && !isNumericList) {
         const partPattern = explicitPartMatch
             ? /\b(?:parte|pt|pag(?:ina)?|p[aá]g|pg)\s*\d+\b/gi
             : /\bp\s*\d+\b/gi;
-        const baseTitle = (sequencePart && part === sequencePart
+        const baseTitle = (usesSequenceOnlyPart
             ? cleanedName.replace(/\s+0*\d{1,3}\s*$/, "")
             : cleanedName.replace(partPattern, ""))
             .replace(/\s{2,}/g, " ")
             .trim();
         let finalBaseTitle = baseTitle || cleanedName;
+        if (tipo === "Prova") {
+            const reversedNMatch = normalizeComparable(finalBaseTitle).match(/^n\s*(\d+)\s+prova$/i);
+            if (reversedNMatch?.[1]) {
+                finalBaseTitle = `Prova N${reversedNMatch[1]}`;
+            }
+        }
         if (tipo === "Lista de Exercícios" && /^\d+$/.test(finalBaseTitle)) {
             finalBaseTitle = `Lista ${finalBaseTitle}`;
         }
-        if (isImage && sequencePart && part === sequencePart && finalBaseTitle.length < 10) {
+        const shouldUseContextForShortImageSequence =
+            isImage &&
+            sequencePart &&
+            part === sequencePart &&
+            usesSequenceOnlyPart &&
+            finalBaseTitle.length < 10 &&
+            /^(?:vs?\d*|prova|n\d+|av\d+|ap\d+|p\d+)$/i.test(normalizeComparable(finalBaseTitle));
+        if (shouldUseContextForShortImageSequence) {
             const contextTitle = subject || subjectSigla || finalBaseTitle;
             if (tipo === "Prova") {
                 return `Prova - ${contextTitle} (Parte ${sequencePart.padStart(2, "0")})`;

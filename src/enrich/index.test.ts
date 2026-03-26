@@ -372,6 +372,11 @@ test("interpreta pasta com sigla sem espacos no hifen", () => {
     assert.equal(inferDisciplina(file), "BEPID Apple");
 });
 
+test("interpreta pasta com sigla e nome sem espacos no hifen", () => {
+    const file = makeFile("/S01/CA-Calculo I/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf");
+    assert.equal(inferDisciplina(file), "Calculo I");
+});
+
 test("nao filtra codigo em disciplinas tecnicas", () => {
     const technicalCode = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/main.c", "main.c", "c");
     const metadata = inferMetadata(technicalCode, { filterCodeFiles: true });
@@ -388,6 +393,11 @@ test("mantem filtro de codigo em contexto nao tecnico", () => {
     const genericCode = makeFile("/S04/PT - Producao Textual/2022.2 - PH/script.c", "script.c", "c");
     const metadata = inferMetadata(genericCode, { filterCodeFiles: true });
     assert.equal(metadata, null);
+});
+
+test("nao exige lista manual para contexto tecnico conhecido", () => {
+    const soCode = makeFile("/S05/SO - Sistemas Operacionais/2022.2 - PH/escalonador.c", "escalonador.c", "c");
+    assert.notEqual(inferMetadata(soCode, { filterCodeFiles: true }), null);
 });
 
 test("ativa filtro de codigo por padrao fora de contexto tecnico", () => {
@@ -482,6 +492,11 @@ test("usa contexto em imagens genericas de prova", () => {
 test("herda contexto para imagem em pasta ignorada", () => {
     const file = makeFile("../provas//S01/CA - Calculo I/2022.1 - Roberto Carlos/pics/1questao.jpeg", "1questao.jpeg", "jpeg");
     assert.equal(normalizeTitle(file), "Calculo I - Questão 1 (2022.1)");
+});
+
+test("preserva nome descritivo em imagem de pasta ignorada", () => {
+    const file = makeFile("/Cadeiras com o Ronaldo/Lasca Ronaldo.gif", "Lasca Ronaldo.gif", "gif");
+    assert.equal(normalizeTitle(file), "Lasca Ronaldo");
 });
 
 test("prioriza projeto para hardware fora de pasta provas", () => {
