@@ -35,6 +35,15 @@ test("ignora pastas genericas na inferencia de disciplina", () => {
     assert.equal(inferDisciplina(file), "Cálculo");
 });
 
+test("ignora pasta relativa em subpastas de documentos", () => {
+    const file = makeFile(
+        "/Documentos/PUDS/../S01/ED - Eletronica Digital/2018.1 - PH/PUD.doc",
+        "PUD.doc",
+        "doc",
+    );
+    assert.equal(inferDisciplina(file), "Eletrônica Digital");
+});
+
 test("normaliza titulo progressivamente para avaliacoes", () => {
     const apFile = makeFile("/S01/ED - Eletronica Digital/2014.2 - JB/AP1.pdf", "AP1.pdf", "pdf");
     assert.equal(normalizeTitle(apFile), "ED - AV1 - 2014.2");
@@ -57,6 +66,11 @@ test("normaliza titulo de plano de ensino e prova em imagem", () => {
         "jpeg",
     );
     assert.equal(normalizeTitle(provaImagem), "Prova N2 (Parte 1)");
+});
+
+test("limpa titulo tecnico de hardware com extensao encadeada", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/relogio.(0).cnf.cdb", "relogio.(0).cnf.cdb", "cdb");
+    assert.equal(normalizeTitle(file), "Relogio (0) cnf");
 });
 
 test("corrige mojibake comum brasileiro", () => {
@@ -119,6 +133,24 @@ test("classifica pdsbak como hardware e proteus", () => {
     const tags = inferTags(file);
     assert.ok(tags.includes("Hardware"));
     assert.ok(tags.includes("Proteus"));
+});
+
+test("classifica extensoes de quartus como hardware e simulacao", () => {
+    const file = makeFile("/S05/MI - Microcontroladores/2022.2 - PH/projeto_final.sof", "projeto_final.sof", "sof");
+    assert.equal(inferTipo(file), "Trabalho/Projeto");
+    const tags = inferTags(file);
+    assert.ok(tags.includes("Hardware"));
+    assert.ok(tags.includes("Simulação"));
+    assert.ok(tags.includes("Quartus"));
+});
+
+test("mantem compatibilidade de pud como tipo prova", () => {
+    const pudFile = makeFile(
+        "/Documentos/PUDS/S01/CA - Calculo I/2018.1 - PH/PUD Calculo I.doc",
+        "PUD Calculo I.doc",
+        "doc",
+    );
+    assert.equal(inferTipo(pudFile), "Prova");
 });
 
 test("adiciona tag projeto para arquivos de proteus", () => {

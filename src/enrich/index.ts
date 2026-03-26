@@ -36,6 +36,9 @@ const NOISE_EXTENSIONS = new Set([
     "orig",
     "swp",
     "lock",
+    "idx",
+    "pack",
+    "rev",
 ]);
 
 const SEMESTER_REGEXES = [
@@ -94,6 +97,9 @@ const IGNORED_SUBJECT_FOLDERS = new Set([
     "conteudo",
     "material de apoio",
     "pics",
+    "material",
+    "outros",
+    "..",
 ]);
 
 const TIPO_PATTERNS = {
@@ -127,7 +133,7 @@ const MATERIAL_FOLDER_PATTERN = /(\/|\b)(puds?|material(?:\s*de)?\s*apoio|monito
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "rtf", "doc", "docx", "odt"]);
 const CODE_EXTENSIONS = new Set(["c", "h", "cpp", "java", "py", "js", "ts", "sql", "m", "asm"]);
-const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "hex", "cof"]);
+const HARDWARE_EXTENSIONS = new Set(["dsn", "pdsprj", "pdsbak", "hex", "cof", "bdf", "bsf", "vpr", "sof", "pof"]);
 const TECHNICAL_SIGLAS = new Set(["ED", "EA", "MI", "SE", "IAI", "STR", "RC", "RCC", "SD", "SM"]);
 
 const TAG_BY_EXTENSION: Record<string, string> = {
@@ -146,6 +152,11 @@ const TAG_BY_EXTENSION: Record<string, string> = {
     dsn: "Proteus",
     pdsprj: "Proteus",
     pdsbak: "Proteus",
+    bdf: "Quartus",
+    bsf: "Quartus",
+    vpr: "Quartus",
+    sof: "Quartus",
+    pof: "Quartus",
     tex: "LaTeX",
     png: "Imagem",
     jpg: "Imagem",
@@ -576,12 +587,12 @@ export function inferTipo(file: RepoFile | null | undefined): string {
         return "Prova";
     }
 
-    if (isProva || isProvasFolder || isAssessmentFolder) {
+    if (isPlanoDeEnsino) {
         return "Prova";
     }
 
-    if (isPlanoDeEnsino) {
-        return "Plano de Ensino";
+    if (isProva || isProvasFolder || isAssessmentFolder) {
+        return "Prova";
     }
 
     if (
@@ -692,7 +703,7 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
         tags.add(extensionTag);
     }
 
-    if (["dsn", "pdsprj", "m"].includes(extension)) {
+    if (["dsn", "pdsprj", "m", "bdf", "bsf", "vpr", "sof", "pof"].includes(extension)) {
         tags.add("Simulação");
     }
 
