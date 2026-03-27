@@ -54,6 +54,20 @@ async function retryWithExponentialBackoff<T>(
     return fn();
 }
 
+const COMPRESSED_EXTENSIONS = new Set(["7z", "zip", "tar", "gz", "bz2", "xz", "rar"]);
+const AI_SUPPORTED_EXTENSIONS = new Set([
+    "txt", "md", "json", "ts", "js", "py", "java", "c", "cpp", "h", "rs", "go", "sh",
+    "yaml", "yml", "html", "htm", "csv", "pdf"
+]);
+
+function isAllowedForAI(extension: string | null | undefined): boolean {
+    if (!extension) return false;
+    const ext = String(extension).trim().toLowerCase();
+
+    if (COMPRESSED_EXTENSIONS.has(ext)) return false;
+    return AI_SUPPORTED_EXTENSIONS.has(ext);
+}
+
 function isGenericDisciplina(value: string | null | undefined): boolean {
     if (!value) return true;
     const v = normalizeComparable(value);
@@ -305,6 +319,18 @@ export async function refineMetadata(
                 score: scored.score,
                 source: "rule",
                 reasons: scored.reasons,
+            },
+        };
+    }
+
+    // Ignore unsupported/compressed files at metadata refinement stage.
+    if (!isAllowedForAI(file.extension)) {
+        return {
+            ...raw,
+            scoreMetadata: {
+                score: scored.score,
+                source: "rule",
+                reasons: [...scored.reasons, "skipped unsupported file type"],
             },
         };
     }
