@@ -1,4 +1,4 @@
-import { RecordCandidate, RepoFile } from "../types";
+import { RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile } from "../types";
 
 const NOISE_PATH_MARKERS = [
     "/.git/",
@@ -3016,3 +3016,111 @@ export function inferTags(file: RepoFile | null | undefined): string[] {
 
     return dedupeTagsByContent(cleanedTags, [disciplina, ...KNOWN_PROFESSORS]);
 }
+
+// 2) Regra de pontuação (pontos sugeridos)
+// a) Disciplina (máximo +60)
+// +40 se DISCIPLINA_BY_SIGLA ou DISCIPLINA_BY_SIGLA_AND_SEMESTER (todos do src/enrich/index.ts linha 110+).
+// +20 se isKnownCurriculumDiscipline(disciplina) (tem função nesta mesma file).
+// -30 se disciplina === "Geral" ou disciplina.startsWith("Outros - Prof") (baixo).
+// -20 se disciplina for Grade SNN ou professor só.
+// b) Tipo (máximo +30)
+// +30 se tipo tiver match forte:
+// comparado com valores esperados do enum (por ex. "Prova", "Lista de Exercícios", "Material de Aula"...) ou
+// TIPO_PATTERNS conseguiu.
+// -10 se tipo === "Material Complementar" ou “Texto/Imagem” genérico.
+// c) Semestre (máximo +30)
+// +30 se semester satisfaz regex ^(?:19|20)\d{2}\.[12]$ (o pipeline já reconhece isso).
+// +15 se semester for ano tipo 2023 (menor confiança).
+// +10 se semester for Grade S\d\d.
+// d) Confiança da fonte + padronização de texto
+// +10 se title contém sigla de disciplina e getSiglaAndName devolveu sigla/nome (ver função).
+// -20 se isLikelyDate(name-without-ext) (muito genérico)
+// -30 se isGarbageIdLikeName(name) ou isGenericTitleLike(nome) (funções existentes)
+// e) Imagem genérica (caso alto impacto)
+// -40 se extensão imagem + nome começa com IMG_ OU photo_ e disciplina “Geral”/“Outros”.
+
+export function scoreRecordCandidate(rule: RecordCandidate): RecordCandidateWithRefinedMetadata {
+    let score = 0;
+    const reasons: string[] = [];
+    if (rule.disciplina) {
+        if (rule.disciplina !== "Geral" && !rule.disciplina.startsWith("Outros - Prof")) {
+            score += 40;
+            reasons.push("Disciplina identificada por sigla");
+        } else {
+            score -= 30;
+            reasons.push("Disciplina genérica");
+        }
+        if (isKnownCurriculumDiscipline(rule.disciplina)) {
+            score += 20;
+            reasons.push("Disciplina é do currículo conhecido");
+        }
+    } else {
+        reasons.push("Disciplina não identificada");
+    }
+    if (rule.tipo) {
+        if (isStrongTipoMatch(rule.tipo)) {
+            score += 30;
+            reasons.push("Tipo tem match forte");
+        } else if (rule.tipo === "Material Complementar" || rule.tipo === "Texto/Imagem") {
+            score -= 10;
+            reasons.push("Tipo genérico");
+        }
+    } else {
+        reasons.push("Tipo não identificado");
+    }
+    if (rule.semester) {
+        if (/^(?:19|20)\d{2}\.[12]$/.test(rule.semester)) {
+            score += 30;
+            reasons.push("Semestre tem formato esperado");
+        } else if (/^(?:19|20)\d{2}$/.test(rule.semester)) {
+            score += 15;
+            reasons.push("Semestre é ano, sem semestre");
+        } else if (/^Grade S\d{2}$/.test(rule.semester)) {
+            score += 10;
+            reasons.push("Semestre é grade SNN");
+        }
+    } else {
+        reasons.push("Semestre não identificado");
+    }
+    if (rule.title) {
+        const siglaAndName = getSiglaAndName(rule.title);
+        if (siglaAndName) {
+            score += 10;
+            reasons.push("Título contém sigla de disciplina");
+        } else if (isLikelyDate(removeExtension(rule.title))) {
+            score -= 20;
+            reasons.push("Título parece ser uma data");
+        } else if (isGarbageIdLikeName(rule.title) || isGenericTitleLike(rule.title)) {
+            score -= 30;
+            reasons.push("Título parece ser um nome genérico ou ID lixo");
+        }
+    } else {
+        reasons.push("Título não identificado");
+    }
+    if (rule.tipo === "Prova" && rule.disciplina && ["Geral", "Outros - Prof"].includes(rule.disciplina)) {
+        score -= 40;
+        reasons.push("Prova genérica com disciplina genérica");
+    }
+    return {
+        ...rule,
+        score,
+        source: "rule",
+        reasons: reasons,
+    };
+}
+
+function isStrongTipoMatch(tipo: string): boolean {
+    return [
+        "Prova",
+        "Lista de Exercícios",
+        "Material de Aula",
+        "Trabalho/Projeto",
+        "Gabarito/Resolução",
+        "Plano de Ensino",
+        "Administrativo/Estágio",
+    ].includes(tipo);
+}
+function removeExtension(title: string): string {
+    return title.replace(/\.[^/.]+$/, "");
+}
+

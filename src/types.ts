@@ -35,4 +35,24 @@ export type RecordCandidate = {
     tags: string[];
 }
 
+export type ConfidenceSource = "rule" | "ai";
+
+export type RuleInference = {
+  disciplina: string | null;
+  tipo: string | null;
+  semester: string | null;
+  title: string;
+  sigla?: string;
+  topics?: string[];
+  score: number;
+  reasons: string[];
+};
+
+export type RecordCandidateWithRefinedMetadata = RecordCandidate & {
+  score: number;
+  source: ConfidenceSource;
+  reasons: string[];
+};
+
+
 export type MigrationResult = {}

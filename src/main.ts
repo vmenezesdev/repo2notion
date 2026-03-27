@@ -11,7 +11,7 @@ import { scanRepository } from "./scan";
 import { clearIntermediateResults, saveIntermediateResult } from "./util";
 import { clear } from "node:console";
 import { collectFiles, dedupeUnicodeEquivalentPaths, removeGitPaths, removeLfsPaths } from "./extract";
-import { inferMetadata } from "./enrich";
+import { refineMetadata } from "./ai-refine";
 
 
 console.log("repo2notion starting...");
@@ -35,7 +35,7 @@ if (!targetDir) {
 async function migrateRepo(rootPath: string, _options: MigrationOptions): Promise<MigrationResult> {
     const repoTree = await scanRepository(rootPath);
     const files = dedupeUnicodeEquivalentPaths(removeGitPaths(removeLfsPaths(collectFiles(repoTree))));
-    const recordCandidates = files.map((file) => inferMetadata(file)).filter((candidate) => candidate !== null);
+    const recordCandidates = await Promise.all(files.map(async (file) => await refineMetadata(file)));
 
     await clearIntermediateResults(
         ["repoTree.json", "files.json", "recordCandidates.json"]
