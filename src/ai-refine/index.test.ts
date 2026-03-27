@@ -63,6 +63,11 @@ test("shouldUseAI retorna true para score baixo e false para score alto", () => 
   assert.equal(shouldUseAI(high), false);
 });
 
+test("shouldUseAI considera gatilho de geração de título", () => {
+  const high = computeRuleScore({ title: "CA - Prova 2018.1", disciplina: "Cálculo", tipo: "Prova", semester: "2018.1", score: 0, reasons: [] });
+  assert.equal(shouldUseAI(high, { shouldGenerateTitle: true }), true);
+});
+
 test("shouldUseAI aciona IA quando disciplina está ausente mesmo com score alto", () => {
   const highButNoDisciplina = {
     title: "Lista 2",
@@ -120,6 +125,7 @@ test("refineMetadata retorna source=ai para baixa confiança (path genérico)", 
       disciplina: null,
       tipo: null,
       semester: null,
+      title: "arquivo_generico_2026",
     }),
   });
   assert.equal(refined.scoreMetadata.source, "ai");
@@ -128,12 +134,14 @@ test("refineMetadata retorna source=ai para baixa confiança (path genérico)", 
 });
 
 test("refineMetadata incorpora sugestão da IA quando disponível", async () => {
-  const file = makeFile("/Outros/arquivo_generico_2026.pdf", "arquivo_generico_2026.pdf", "pdf");
+  const file = makeFile("/S07/GR/Aula 15/15354113_10207630331179536.jpg", "15354113_10207630331179536.jpg", "jpg");
+  const aiTitle = "Grafos - Aula 15 - Exemplo de Método Húngaro";
   const refined = await refineMetadata(file, {
     llmCaller: async () => ({
       disciplina: "Sistemas Operacionais",
       tipo: "Resumo",
       semester: "2021.2",
+      title: aiTitle,
     }),
   });
 
@@ -141,7 +149,24 @@ test("refineMetadata incorpora sugestão da IA quando disponível", async () => 
   assert.equal(refined.disciplina, "Sistemas Operacionais");
   assert.equal(refined.tipo, "Resumo");
   assert.equal(refined.semester, "2021.2");
+  assert.equal(refined.title, aiTitle);
   assert.ok(refined.scoreMetadata.score > 0);
   assert.ok(refined.scoreMetadata.reasons.includes("ai fallback"));
   assert.ok(!refined.scoreMetadata.reasons.includes("ai não sugeriu disciplina"));
+  assert.ok(refined.scoreMetadata.reasons.includes("ai sugeriu título"));
+});
+
+test("refineMetadata mantém título quando IA devolve título fraco", async () => {
+  const file = makeFile("/S07/GR/Aula 15/15354113_10207630331179536.jpg", "15354113_10207630331179536.jpg", "jpg");
+  const refined = await refineMetadata(file, {
+    llmCaller: async () => ({
+      disciplina: "Sistemas Operacionais",
+      tipo: "Resumo",
+      semester: "2021.2",
+      title: "prova",
+    }),
+  });
+
+  assert.notEqual(refined.title, "prova");
+  assert.ok(!refined.scoreMetadata.reasons.includes("ai sugeriu título"));
 });

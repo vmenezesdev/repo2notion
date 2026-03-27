@@ -31,11 +31,12 @@ function getPositiveIntFromEnv(value: string | undefined): number | null {
     return parsed;
 }
 
-function buildLLMFallbackResult(): { disciplina: string | null; tipo: string | null; semester: string | null } {
+function buildLLMFallbackResult(): { disciplina: string | null; tipo: string | null; semester: string | null; title: string | null } {
     return {
         disciplina: null,
         tipo: null,
         semester: null,
+        title: null,
     };
 }
 
@@ -114,7 +115,7 @@ async function retryWithExponentialBackoff<T>(
 const COMPRESSED_EXTENSIONS = new Set(["7z", "zip", "tar", "gz", "bz2", "xz", "rar"]);
 const AI_SUPPORTED_EXTENSIONS = new Set([
     "txt", "md", "json", "ts", "js", "py", "java", "c", "cpp", "h", "rs", "go", "sh",
-    "yaml", "yml", "html", "htm", "csv", "pdf"
+    "yaml", "yml", "html", "htm", "csv", "pdf", "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "heic"
 ]);
 
 function isAllowedForAI(extension: string | null | undefined): boolean {
@@ -141,6 +142,104 @@ function isLikelyWeakTitle(value: string | null | undefined): boolean {
     if (!value) return true;
     const v = normalizeComparable(value);
     return v.length === 0 || /^\d+$/.test(v) || /^(?:n|av|ap|p)\s*[1-4]$/.test(v) || v === "prova";
+}
+
+function removeExtension(value: string | null | undefined): string {
+    if (!value) return "";
+    return String(value).replace(/\.[^/.]+$/, "");
+}
+
+function isLikelyDateLikeName(value: string | null | undefined): boolean {
+    if (!value) return false;
+    const normalized = normalizeComparable(removeExtension(value));
+    if (!normalized) return false;
+
+    return /\b(?:19|20)\d{2}[._/-]?\d{1,2}[._/-]?\d{1,2}(?:[t\s_-]?\d{2}[._:-]\d{2}(?:[._:-]\d{2})?)?\b/i.test(normalized);
+}
+
+function isGarbageIdLikeName(value: string | null | undefined): boolean {
+    if (!value) return false;
+
+    const normalized = removeExtension(String(value)).trim();
+    if (!normalized) return false;
+
+    const comparable = normalizeComparable(normalized);
+
+    if (isLikelyDateLikeName(normalized)) {
+        const cameraTimestampLike = /^(?:p|img|dsc|photo|whatsapp|screenshot|snapshot|scan|captura|pxl)[\s._-]*\d+/i.test(comparable);
+        return cameraTimestampLike;
+    }
+
+    if (/^[\d_\-\s]{10,}$/.test(normalized)) {
+        return true;
+    }
+
+    const compact = normalized.replace(/\s+/g, "");
+    if (/^\d{10,}[a-z]?$/i.test(compact)) {
+        return true;
+    }
+
+    const idSuffixMatch = normalized.match(/[\s_.\-]{1,3}(\d{8,})$/);
+    if (idSuffixMatch) {
+        const prefix = normalized.slice(0, idSuffixMatch.index).trim();
+        if (/[A-Za-zÀ-ÿ]{3,}/.test(prefix)) {
+            return true;
+        }
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 3 && tokens.every((token) => /^\d+[a-z]?$/i.test(token))) {
+        return true;
+    }
+
+    const digitCount = (normalized.match(/\d/g) ?? []).length;
+    const letterCount = (normalized.match(/[A-Za-zÀ-ÿ]/g) ?? []).length;
+    return digitCount >= 10 && letterCount <= 2;
+}
+
+function isOriginalFileNameTitle(title: string | null | undefined, fileName: string | null | undefined): boolean {
+    const normalizedTitle = normalizeComparable(removeExtension(title));
+    const normalizedFileName = normalizeComparable(removeExtension(fileName));
+    return Boolean(normalizedTitle) && normalizedTitle === normalizedFileName;
+}
+
+function shouldGenerateTitleWithAI(input: {
+    fileName: string;
+    title: string;
+    score: number;
+}): boolean {
+    if (isGarbageIdLikeName(input.fileName)) return true;
+    if (isLikelyDateLikeName(input.fileName)) return true;
+    if (isLikelyWeakTitle(input.title)) return true;
+    if (input.score < 70 && isOriginalFileNameTitle(input.title, input.fileName)) return true;
+    return false;
+}
+
+function normalizeSuggestedTitle(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = value
+        .replace(/\s+/g, " ")
+        .replace(/\s*[-–—:]+\s*$/, "")
+        .trim();
+    return normalized.length > 0 ? normalized : null;
+}
+
+function isAcceptableSuggestedTitle(value: string | null, previousTitle: string): boolean {
+    if (!value) return false;
+
+    if (normalizeComparable(value) === normalizeComparable(previousTitle)) {
+        return false;
+    }
+
+    if (isLikelyWeakTitle(value)) {
+        return false;
+    }
+
+    if (isGarbageIdLikeName(value) || isLikelyDateLikeName(value)) {
+        return false;
+    }
+
+    return value.length >= 4;
 }
 
 const WELL_KNOWN_TIPOS = new Set([
@@ -216,8 +315,12 @@ export function computeRuleScore(rule: RuleInference | RecordCandidate): RuleInf
     };
 }
 
-export function shouldUseAI(scored: RuleInference & { score: number; reasons: string[] }): boolean {
-    if (scored.score <= 80) return true;
+export function shouldUseAI(
+    scored: RuleInference & { score: number; reasons: string[] },
+    options?: { shouldGenerateTitle?: boolean },
+): boolean {
+    if (options?.shouldGenerateTitle) return true;
+    if (scored.score <= 70) return true;
     if (!scored.disciplina || isGenericDisciplina(scored.disciplina)) return true;
     return false;
 }
@@ -226,24 +329,36 @@ export function buildAIPrompt(input: {
     path: string;
     name: string;
     extension: string;
+    title: string;
+    generateTitle: boolean;
     rule: RuleInference & { score: number; reasons: string[] };
 }): string {
-    return `A partir deste arquivo, identifique disciplina, tipo e semestre com o máximo de precisão:
+    return `A partir deste arquivo, identifique disciplina, tipo e semestre com o máximo de precisão.
+Também analise se deve propor um título humano e descritivo para o campo "title".
 
 Caminho: ${input.path}
 Nome: ${input.name}
 Extensão: ${input.extension}
+Título atual: ${input.title}
 Disciplina atual: ${input.rule.disciplina ?? "null"}
 Tipo atual: ${input.rule.tipo ?? "null"}
 Semestre atual: ${input.rule.semester ?? "null"}
 Score: ${input.rule.score}
 Motivos: ${input.rule.reasons.join("; ")}
+Gerar novo título: ${input.generateTitle ? "sim" : "não"}
 
-Retorne JSON puro: {"disciplina": ..., "tipo": ..., "semester": ...} (use null se nenhum valor)
+Regras para o campo "title":
+- Se "Gerar novo título" for "sim", ignore IDs numéricos e timestamps no nome original e produza um título humano baseado no caminho e no conteúdo do arquivo.
+- Seja conservador: não invente assunto específico sem evidência no conteúdo.
+- Se não houver evidência suficiente do assunto, use fallback contextual como "[Disciplina] - [Tipo]".
+- Se "Gerar novo título" for "não", preserve o título atual retornando-o sem mudanças.
+
+Retorne JSON puro: {"disciplina": ..., "tipo": ..., "semester": ..., "title": ...}
+Use null para disciplina/tipo/semester quando não souber. O campo title deve ser sempre uma string não vazia.
 `;
 }
 
-export async function callLLM(prompt: string, file: RepoFile): Promise<{ disciplina: string | null; tipo: string | null; semester: string | null }> {
+export async function callLLM(prompt: string, file: RepoFile): Promise<{ disciplina: string | null; tipo: string | null; semester: string | null; title: string | null }> {
     // Stub local. Substitua por chamada real ao seu LLM preferido.
     // Use ai do Gemini
 
@@ -296,8 +411,12 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
                             disciplina: { type: "string" },
                             tipo: { type: "string" },
                             semester: { type: "string" },
+                            title: {
+                                type: "string",
+                                description: "Um título humano e descritivo, ignorando códigos numéricos de sistema ou timestamps.",
+                            },
                         },
-                        required: ["disciplina", "tipo", "semester"],
+                        required: ["disciplina", "tipo", "semester", "title"],
                     }
                 },
                 contents: [
@@ -356,7 +475,7 @@ export function computeFinalScore(
 export async function refineMetadata(
     file: RepoFile,
     options?: {
-        llmCaller?: (prompt: string, file: RepoFile) => Promise<{ disciplina: string | null; tipo: string | null; semester: string | null }>;
+        llmCaller?: (prompt: string, file: RepoFile) => Promise<{ disciplina: string | null; tipo: string | null; semester: string | null; title: string | null }>;
     },
 ): Promise<RecordCandidateWithRefinedMetadata> {
     const raw = inferMetadata(file) || {
@@ -378,8 +497,13 @@ export async function refineMetadata(
     };
 
     const scored = computeRuleScore(base);
+    const shouldGenerateTitle = shouldGenerateTitleWithAI({
+        fileName: file.name,
+        title: raw.title,
+        score: scored.score,
+    });
 
-    if (!shouldUseAI(scored)) {
+    if (!shouldUseAI(scored, { shouldGenerateTitle })) {
         return {
             ...raw,
             scoreMetadata: {
@@ -402,24 +526,40 @@ export async function refineMetadata(
         };
     }
 
-    const prompt = buildAIPrompt({ path: file.path, name: file.name, extension: file.extension, rule: scored });
+    const prompt = buildAIPrompt({
+        path: file.path,
+        name: file.name,
+        extension: file.extension,
+        title: raw.title,
+        generateTitle: shouldGenerateTitle,
+        rule: scored,
+    });
     const ai = await (options?.llmCaller ?? callLLM)(prompt, file);
 
     const finalDisciplina = ai.disciplina ?? scored.disciplina;
     const finalTipo = ai.tipo ?? scored.tipo;
     const finalSemester = ai.semester ?? scored.semester;
+    const normalizedSuggestedTitle = normalizeSuggestedTitle(ai.title);
+    const shouldApplySuggestedTitle = shouldGenerateTitle && isAcceptableSuggestedTitle(normalizedSuggestedTitle, raw.title);
+    const finalTitle = shouldApplySuggestedTitle ? normalizedSuggestedTitle! : raw.title;
 
     const finalScore = computeFinalScore(finalDisciplina, finalTipo, finalSemester, scored);
 
     return {
         ...raw,
+        title: finalTitle,
         disciplina: finalDisciplina ?? undefined,
         tipo: finalTipo ?? undefined,
         semester: finalSemester ?? undefined,
         scoreMetadata: {
             score: finalScore,
             source: "ai",
-            reasons: [...scored.reasons, "ai fallback", ...(ai.disciplina ? [] : ["ai não sugeriu disciplina"])],
+            reasons: [
+                ...scored.reasons,
+                "ai fallback",
+                ...(ai.disciplina ? [] : ["ai não sugeriu disciplina"]),
+                ...(shouldApplySuggestedTitle ? ["ai sugeriu título"] : []),
+            ],
         },
     };
 }
@@ -465,6 +605,7 @@ function parseLLMResponse(response: any): {
     disciplina: string | null;
     tipo: string | null;
     semester: string | null;
+    title: string | null;
 } {
     try {
         const content = response.candidates[0]?.content;
@@ -482,13 +623,27 @@ function parseLLMResponse(response: any): {
             raw = fencedMatch[1].trim();
         }
 
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+
+        const safeText = (value: unknown): string | null => {
+            if (typeof value !== "string") return null;
+            const normalized = value.trim();
+            return normalized.length > 0 ? normalized : null;
+        };
+
+        return {
+            disciplina: safeText(parsed?.disciplina),
+            tipo: safeText(parsed?.tipo),
+            semester: safeText(parsed?.semester),
+            title: safeText(parsed?.title),
+        };
     } catch (error) {
         console.error("Erro ao parsear resposta da LLM:", error);
         return {
             disciplina: null,
             tipo: null,
             semester: null,
+            title: null,
         };
     }
 }
