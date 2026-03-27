@@ -63,12 +63,12 @@ test("shouldUseAI retorna true para score baixo e false para score alto", () => 
   assert.equal(shouldUseAI(high), false);
 });
 
-test("shouldUseAI considera gatilho de geração de título", () => {
+test("shouldUseAI não usa IA para score alto mesmo com gatilho de título", () => {
   const high = computeRuleScore({ title: "CA - Prova 2018.1", disciplina: "Cálculo", tipo: "Prova", semester: "2018.1", score: 0, reasons: [] });
-  assert.equal(shouldUseAI(high, { shouldGenerateTitle: true }), true);
+  assert.equal(shouldUseAI(high, { shouldGenerateTitle: true }), false);
 });
 
-test("shouldUseAI aciona IA quando disciplina está ausente mesmo com score alto", () => {
+test("shouldUseAI não usa IA quando disciplina está ausente mas score já é alto", () => {
   const highButNoDisciplina = {
     title: "Lista 2",
     disciplina: null,
@@ -78,7 +78,7 @@ test("shouldUseAI aciona IA quando disciplina está ausente mesmo com score alto
     reasons: ["score sintético para validar regra"],
   };
 
-  assert.equal(shouldUseAI(highButNoDisciplina), true);
+  assert.equal(shouldUseAI(highButNoDisciplina), false);
 });
 
 test("computeFinalScore aplica bônus e limita em 100", () => {
@@ -134,7 +134,7 @@ test("refineMetadata retorna source=ai para baixa confiança (path genérico)", 
 });
 
 test("refineMetadata incorpora sugestão da IA quando disponível", async () => {
-  const file = makeFile("/S07/GR/Aula 15/15354113_10207630331179536.jpg", "15354113_10207630331179536.jpg", "jpg");
+  const file = makeFile("/Outros/IMG_20260101_15354113.jpg", "IMG_20260101_15354113.jpg", "jpg");
   const aiTitle = "Grafos - Aula 15 - Exemplo de Método Húngaro";
   const refined = await refineMetadata(file, {
     llmCaller: async () => ({
@@ -157,7 +157,7 @@ test("refineMetadata incorpora sugestão da IA quando disponível", async () => 
 });
 
 test("refineMetadata mantém título quando IA devolve título fraco", async () => {
-  const file = makeFile("/S07/GR/Aula 15/15354113_10207630331179536.jpg", "15354113_10207630331179536.jpg", "jpg");
+  const file = makeFile("/Outros/IMG_20260101_15354113.jpg", "IMG_20260101_15354113.jpg", "jpg");
   const refined = await refineMetadata(file, {
     llmCaller: async () => ({
       disciplina: "Sistemas Operacionais",
@@ -172,7 +172,7 @@ test("refineMetadata mantém título quando IA devolve título fraco", async () 
 });
 
 test("refineMetadata corrige mojibake no título sugerido pela IA", async () => {
-  const file = makeFile("/S07/GR/Aula 15/15354113_10207630331179536.jpg", "15354113_10207630331179536.jpg", "jpg");
+  const file = makeFile("/Outros/IMG_20260101_15354113.jpg", "IMG_20260101_15354113.jpg", "jpg");
   const refined = await refineMetadata(file, {
     llmCaller: async () => ({
       disciplina: "RegulaÃ§Ã£o",

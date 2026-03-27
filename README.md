@@ -73,10 +73,12 @@ Share the root Notion page/database with your integration
 NOTION_API_KEY=<your-notion-api-key>
 NOTION_ROOT_PAGE_ID=<notion-root-page-id>
 SCORE_THRESHOLD=80
+AI_SCORE_THRESHOLD=80
 REFINE_BATCH_SIZE=20
 ```
 
 - `SCORE_THRESHOLD` define o corte entre candidatos bons e não classificados (1-100, padrão: 80)
+- `AI_SCORE_THRESHOLD` define o corte para chamar IA no refine (somente score abaixo do valor; padrão: usa `SCORE_THRESHOLD` ou 80)
 - `REFINE_BATCH_SIZE` controla quantos arquivos são refinados em paralelo por lote (padrão: 20 em repositórios grandes, 40 nos demais)
 
 ### 4. Install and run

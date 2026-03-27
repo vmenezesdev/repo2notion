@@ -16,6 +16,7 @@ async function getAIClient(): Promise<any> {
 }
 const DEFAULT_MAX_AI_FILE_BYTES = 20 * 1024 * 1024;
 const DEFAULT_MAX_AI_FILE_METADATA_CHARS = 1_500;
+const DEFAULT_AI_SCORE_THRESHOLD = 80;
 const MAX_AI_FILE_BYTES = getPositiveIntFromEnv(process.env.AI_MAX_FILE_BYTES) ?? DEFAULT_MAX_AI_FILE_BYTES;
 const MAX_AI_FILE_METADATA_CHARS = getPositiveIntFromEnv(process.env.AI_MAX_FILE_METADATA_CHARS) ?? DEFAULT_MAX_AI_FILE_METADATA_CHARS;
 
@@ -384,11 +385,17 @@ export function computeRuleScore(rule: RuleInference | RecordCandidate): RuleInf
 
 export function shouldUseAI(
     scored: RuleInference & { score: number; reasons: string[] },
-    options?: { shouldGenerateTitle?: boolean },
+    _options?: { shouldGenerateTitle?: boolean },
 ): boolean {
-    if (options?.shouldGenerateTitle) return true;
-    if (scored.score <= 70) return true;
-    if (!scored.disciplina || isGenericDisciplina(scored.disciplina)) return true;
+    const configuredThreshold =
+        getPositiveIntFromEnv(process.env.AI_SCORE_THRESHOLD)
+        ?? getPositiveIntFromEnv(process.env.SCORE_THRESHOLD)
+        ?? DEFAULT_AI_SCORE_THRESHOLD;
+
+    const threshold = Math.max(1, Math.min(100, configuredThreshold));
+
+    if (scored.score < threshold) return true;
+
     return false;
 }
 
