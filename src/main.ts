@@ -37,6 +37,13 @@ async function migrateRepo(rootPath: string, _options: MigrationOptions): Promis
     const files = dedupeUnicodeEquivalentPaths(removeGitPaths(removeLfsPaths(collectFiles(repoTree))));
     const recordCandidates = await Promise.all(files.map(async (file) => await refineMetadata(file)));
 
+    const goodCandidates = recordCandidates.filter(c => c.score >= 80);
+    const badCandidates = recordCandidates.filter(c => c.score < 80);
+
+    console.log(`Total files: ${files.length}`);
+    console.log(`Good candidates (score >= 80): ${goodCandidates.length}`);
+    console.log(`Bad candidates (score < 80): ${badCandidates.length}`);
+
     await clearIntermediateResults(
         ["repoTree.json", "files.json", "recordCandidates.json"]
     );
