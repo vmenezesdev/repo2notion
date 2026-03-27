@@ -1,9 +1,11 @@
-import { parse } from "node:path";
+import { parse, basename, isAbsolute, resolve } from "node:path";
+import { randomUUID } from "crypto";
+import { createReadStream } from "fs";
 import { inferMetadata } from "../enrich";
 import { RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile, RuleInference } from "../types";
 import { GenerateContentResponse, GoogleGenAI } from '@google/genai';
 
-const ai = new GoogleGenAI({ apiKey: 'GEMINI_API_KEY' });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 function normalizeComparable(value: string | null | undefined): string {
     if (!value) return "";
@@ -131,9 +133,39 @@ Retorne JSON puro: {"disciplina": ..., "tipo": ..., "semester": ...} (use null s
 export async function callLLM(prompt: string, file: RepoFile): Promise<{ disciplina: string | null; tipo: string | null; semester: string | null }> {
     // Stub local. Substitua por chamada real ao seu LLM preferido.
     // Use ai do Gemini
+
     try {
+        const absolutePath = isAbsolute(file.path) ? file.path : resolve(process.cwd(), file.path);
+        const mimeType = fromExtensionToMime(file.extension);
+        const displayName = basename(file.path);
+        const name = createUniqueUploadResourceName(displayName);
+
+        const uploadConfig: any = {
+            name,
+            displayName,
+        };
+
+        if (mimeType) {
+            uploadConfig.mimeType = mimeType;
+        }
+
+        const uploadedFile = await ai.files.upload({
+            file: absolutePath,
+            config: uploadConfig,
+        });
+
+        await waitForActiveFile(uploadedFile);
+
+        const fileData: any = {
+            fileUri: uploadedFile.uri,
+        };
+
+        if (mimeType) {
+            fileData.mimeType = mimeType;
+        }
+
         const response = await ai.models.generateContent({
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
             config: {
                 responseJsonSchema: {
                     type: "object",
@@ -156,11 +188,7 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
                             text: JSON.stringify(file) // Enviar os dados do arquivo como parte do prompt para ajudar na inferência
                         },
                         {
-                            fileData: {
-                                fileUri: file.path,
-                                mimeType: fromExtensionToMime(file.extension),
-                                displayName: file.name,
-                            }
+                            fileData
                         }
                     ]
                 }
@@ -251,11 +279,12 @@ export async function refineMetadata(
 }
 
 
-function fromExtensionToMime(extension: string): string {
-    const ext = extension.toLowerCase();
+function fromExtensionToMime(extension: string): string | undefined {
+    const ext = String(extension ?? "").trim().toLowerCase();
     switch (ext) {
         case "pdf": return "application/pdf";
-        case "doc": case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        case "doc":
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         case "xls":
         case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         case "ppt":
@@ -263,8 +292,26 @@ function fromExtensionToMime(extension: string): string {
         case "jpg":
         case "jpeg": return "image/jpeg";
         case "png": return "image/png";
-        case "txt": return "text/plain";
-        default: return "application/octet-stream";
+        case "txt":
+        case "md":
+        case "json":
+        case "ts":
+        case "js":
+        case "py":
+        case "java":
+        case "c":
+        case "cpp":
+        case "h":
+        case "rs":
+        case "go":
+        case "sh": return "text/plain";
+        case "yaml":
+        case "yml": return "application/x-yaml";
+        case "html":
+        case "htm": return "text/html";
+        case "csv": return "text/csv";
+        case "zip": return "application/zip";
+        default: return undefined;
     }
 }
 
@@ -282,7 +329,14 @@ function parseLLMResponse(response: GenerateContentResponse): {
         if (!textPart) {
             throw new Error("Resposta da LLM não contém parte de texto");
         }
-        return JSON.parse(textPart.text);
+
+        let raw = String(textPart.text || "").trim();
+        const fencedMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (fencedMatch) {
+            raw = fencedMatch[1].trim();
+        }
+
+        return JSON.parse(raw);
     } catch (error) {
         console.error("Erro ao parsear resposta da LLM:", error);
         return {
@@ -293,3 +347,44 @@ function parseLLMResponse(response: GenerateContentResponse): {
     }
 }
 
+function normalizeFileResourceName(name: string): string {
+    if (!name) {
+        return "file";
+    }
+    const normalized = String(name)
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+    return normalized || "file";
+}
+
+function createUniqueUploadResourceName(baseName: string): string {
+    const clean = normalizeFileResourceName(baseName);
+    const randomSuffix = randomUUID().replace(/[^a-z0-9]/g, "").slice(0, 8) || "rnd";
+    const maxPrefixLength = 40 - 1 - randomSuffix.length; // 1 for dash
+    const prefix = clean.slice(0, Math.max(1, maxPrefixLength));
+    return `${prefix}-${randomSuffix}`;
+}
+
+async function waitForActiveFile(file) {
+    let attempts = 0;
+    while (file.state !== "ACTIVE") {
+        if (file.state === "FAILED") {
+            const details = file.error || file.failureReason || "unknown reason";
+            throw new Error(`File processing failed: ${file.name} (${details})`);
+        }
+
+        attempts += 1;
+        if (attempts > 30) {
+            throw new Error(`File processing timed out: ${file.name} (last state: ${file.state})`);
+        }
+
+        console.log("Polling state:", file.state);
+        await wait(5_000); // non‑blocking delay
+        file = await ai.files.get({ name: file.name });
+    }
+    return file;
+}
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));

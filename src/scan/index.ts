@@ -1,4 +1,5 @@
 import { readdir } from "fs/promises";
+import { join } from "path";
 
 import { RepoDirectory, RepoNode } from "../types";
 import { Dirent } from "fs";
@@ -14,7 +15,7 @@ async function scanDirectory(path: string): Promise<RepoDirectory> {
         kind: "directory",
         name: "",
         path: path,
-        children: await Promise.all(dirents.map((dirent) => scanDirent(dirent, dirent.parentPath)))
+        children: await Promise.all(dirents.map((dirent) => scanDirent(dirent, path)))
     };
 }
 
@@ -25,10 +26,10 @@ async function scanDirent(dirent: Dirent, parentPath: string): Promise<RepoNode>
             kind: "file",
             name: dirent.name,
             extension: getFileExtension(dirent.name),
-            path: `${parentPath}/${dirent.name}`
+            path: join(parentPath, dirent.name)
         }
     } else if (dirent.isDirectory()) {
-        return await scanDirectory(`${parentPath}/${dirent.name}`);
+        return await scanDirectory(join(parentPath, dirent.name));
     } else {
     //    console.warn("Found unsupprted dirent type: ", dirent);
     }
