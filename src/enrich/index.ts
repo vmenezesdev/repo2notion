@@ -146,7 +146,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     ED2: "Estrutura de Dados II",
     MD: "Matemática Discreta",
     ATC: "Aspectos Teóricos da Computação",
-    IAI: "Introdução à Automação Industrial",
+    IAI: "Introdução à Automação Industrial e Controle",
     IAA: "Introdução à Análise de Algoritmos",
     IN: "Instrumentação",
     POO: "Programação Orientada a Objetos",
@@ -160,7 +160,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     CG: "Computação Gráfica",
     ENGSOFT: "Engenharia de Software",
     ES: "Engenharia de Software",
-    FE: "Física",
+    FE: "Física-Eletricidade",
     GR: "Grafos",
     IP: "Introdução à Programação",
     LI: "Libras",
@@ -186,7 +186,7 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     EA: "Eletrônica Analógica",
     EI: "Eletrônica Industrial",
     MI: "Microcontroladores e Microprocessadores",
-    MCT: "Metodologia Científica",
+    MCT: "Metodologia Científica e Tecnológica",
     GP: "Gerenciamento de Projetos",
     SM: "Sistemas Multimídia",
     PT: "Produção Textual",
@@ -194,6 +194,16 @@ const DISCIPLINA_BY_SIGLA: Record<string, string> = {
     PS: "Projeto Social",
     TCC: "Trabalho de Conclusão de Curso",
     BEPID: "BEPID Apple",
+    // Disciplinas do currículo sem sigla prévia
+    FEM: "Físico-Eletromagnetismo",
+    CQ: "Controle de Qualidade",
+    CC: "Construção de Compiladores",
+    FD: "Filtros Digitais",
+    DDB: "Desenvolvimento de Banco de Dados",
+    PSE: "Projeto de Sistemas Embarcados",
+    SRC: "Segurança em Redes de Computadores",
+    RCF: "Redes de Computadores em Fio",
+    QUI: "Química",
 };
 
 const DISCIPLINA_BY_SIGLA_AND_SEMESTER: Record<string, Record<number, string>> = {
@@ -201,6 +211,11 @@ const DISCIPLINA_BY_SIGLA_AND_SEMESTER: Record<string, Record<number, string>> =
         1: "Eletrônica Digital",
         2: "Eletrônica Digital",
         3: "Estrutura de Dados",
+    },
+    // FE é ambíguo: S02 = Física-Eletricidade, S03 = Físico-Eletromagnetismo
+    FE: {
+        2: "Física-Eletricidade",
+        3: "Físico-Eletromagnetismo",
     },
 };
 
@@ -555,6 +570,37 @@ for (const [sigla, bySemester] of Object.entries(DISCIPLINA_BY_SIGLA_AND_SEMESTE
     }
 }
 
+// Fonte de verdade: disciplinas oficiais da Matriz Curricular 6759
+// (Bacharelado em Engenharia de Computação — IFCE, 2015/2)
+const CURRICULUM_DISCIPLINES_BY_PERIOD: Record<number, string[]> = {
+    1: ["Lógica Matemática", "Introdução à Programação", "Eletrônica Digital", "Cálculo I"],
+    2: ["Matemática Discreta", "Programação Orientada a Objetos", "Eletrônica Analógica", "Cálculo II", "Física-Eletricidade"],
+    3: ["Introdução à Análise de Algoritmos", "Estrutura de Dados", "Circuitos Eletrônicos", "Arquitetura de Computadores", "Físico-Eletromagnetismo", "Equações Diferenciais", "Instrumentação"],
+    4: ["Eletrônica Industrial", "Língua Brasileira de Sinais", "Paradigmas de Programação", "Aspectos Teóricos da Computação", "Pesquisa e Ordenação", "Microcontroladores e Microprocessadores", "Geometria Analítica e Álgebra Linear"],
+    5: ["Metodologia Científica e Tecnológica", "Cálculo Numérico", "Banco de Dados", "Sistemas Lineares", "Sistemas Operacionais", "Controle de Qualidade", "Economia para Profissionais de Tecnologia", "Construção de Compiladores"],
+    6: ["Filtros Digitais", "Desenvolvimento de Banco de Dados", "Engenharia de Software", "Probabilidade e Estatística", "Redes de Computadores", "Sistemas Embarcados"],
+    7: ["Interação Humano Computador", "Computação Gráfica", "Grafos", "Produção Textual", "Introdução à Automação Industrial e Controle", "Projeto de Sistemas Embarcados", "Segurança em Redes de Computadores", "Gerenciamento de Projetos"],
+    8: ["Sistemas Multimídia", "Química", "Padrões de Projeto", "Projeto de Sistemas de Informação", "Inteligência Computacional", "Sistemas Distribuídos", "Sistemas de Tempo Real", "Aplicações de Controle"],
+    9: ["Trabalho de Graduação Interdisciplinar", "Empreendedorismo e Gestão", "Programação Paralela e Distribuída", "Redes de Computadores em Fio"],
+    10: ["Visão Computacional", "Ética e Filosofia", "Projeto Social"],
+};
+
+// Set de comparables de disciplinas curriculares (sem acento, lowercase) para lookup rápido
+const KNOWN_CURRICULUM_DISCIPLINE_COMPARABLES = new Set<string>();
+// Mapa de comparable → período, para desambiguação por semestre
+const DISCIPLINE_TO_CURRICULUM_PERIOD = new Map<string, number>();
+
+for (const [periodStr, disciplines] of Object.entries(CURRICULUM_DISCIPLINES_BY_PERIOD)) {
+    const period = Number(periodStr);
+    for (const discipline of disciplines) {
+        const comparable = normalizeComparable(discipline);
+        KNOWN_CURRICULUM_DISCIPLINE_COMPARABLES.add(comparable);
+        if (!DISCIPLINE_TO_CURRICULUM_PERIOD.has(comparable)) {
+            DISCIPLINE_TO_CURRICULUM_PERIOD.set(comparable, period);
+        }
+    }
+}
+
 function safeString(value: unknown): string {
     return typeof value === "string" ? value.normalize("NFC") : "";
 }
@@ -718,6 +764,31 @@ function escapeRegExp(value: string): string {
 
 function buildUnicodeWholeWordRegex(term: string): RegExp {
     return new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(term)})(?=$|[^\\p{L}\\p{N}])`, "iu");
+}
+
+/**
+ * Verifica se um nome de pasta corresponde (exato ou prefixo) a uma disciplina
+ * oficial da Matriz Curricular 6759 (Engenharia de Computação — IFCE 2015/2).
+ * Usado para distinguir disciplinas reais de pastas de tópicos/organização.
+ */
+function isKnownCurriculumDiscipline(name: string): boolean {
+    if (!name) {
+        return false;
+    }
+    const comparable = normalizeComparable(name);
+    if (!comparable) {
+        return false;
+    }
+    if (KNOWN_CURRICULUM_DISCIPLINE_COMPARABLES.has(comparable)) {
+        return true;
+    }
+    // Permite prefixo: "Banco" → "Banco de Dados", "Redes" → "Redes de Computadores"
+    for (const known of KNOWN_CURRICULUM_DISCIPLINE_COMPARABLES) {
+        if (known.startsWith(`${comparable} `) || comparable.startsWith(`${known} `)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function isLikelySigla(sigla: string): boolean {
@@ -2501,7 +2572,7 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
             continue;
         }
 
-        if (sigla && hasLetterInSigla && !hasGenericPrefix) {
+        if (sigla && hasLetterInSigla && !hasGenericPrefix && !isGenericContextFolder) {
             const resolvedByContext = resolveDisciplinaBySigla(sigla, path);
             if (name) {
                 const normalizedName = normalizeText(name);
@@ -2515,6 +2586,11 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
                             return `${normalizedName} ${calculoLevel}`;
                         }
                     }
+                }
+                // FE é ambíguo entre Física-Eletricidade (S2) e Físico-Eletromagnetismo (S3).
+                // "Fisica" como nome genérico na pasta não discrimina — confiar na resolução por semestre.
+                if (sigla === "FE" && resolvedByContext && /^fisica$/i.test(normalizeComparable(normalizedName))) {
+                    return withDisciplineSpecialization(resolvedByContext, file);
                 }
                 if (hasExplicitName) {
                     if (
@@ -2558,6 +2634,26 @@ export function inferDisciplina(file: RepoFile | null | undefined): string {
         const isWeakSingleToken = /^[A-Za-z]\d{1,3}$/i.test(part) || /^[A-Za-z]$/i.test(part);
         if (!hasMeaningfulLetters || isWeakSingleToken) {
             continue;
+        }
+
+        // Desambiguação especial: "Física" sozinha pode ser S2 ou S3
+        if (normalizeComparable(part) === "fisica") {
+            const semNumber = getSemesterNumberFromPath(path);
+            if (semNumber === 3) {
+                return "Físico-Eletromagnetismo";
+            }
+            return "Física-Eletricidade";
+        }
+
+        // Valida contra a matriz curricular oficial para evitar capturar pastas de
+        // tópicos (ex: "Hash", "Pilha", "Circuito RC") como se fossem disciplinas.
+        // Nomes com 1-2 palavras que não constam no currículo são ignorados;
+        // nomes mais longos ainda são aceitos (provável disciplina de outro semestre).
+        if (!isKnownCurriculumDiscipline(part)) {
+            const wordCount = comparable.split(/\s+/).filter(Boolean).length;
+            if (wordCount <= 2) {
+                continue;
+            }
         }
 
         return withDisciplineSpecialization(part, file);

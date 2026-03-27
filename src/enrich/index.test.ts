@@ -34,7 +34,7 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S04/PDS - Processamento Digital de Sinais/2020.2 - PH/AP1.pdf", "AP1.pdf", "pdf")), "Processamento Digital de Sinais");
     assert.equal(inferDisciplina(makeFile("/S02/MD - Matematica Discreta/2019.2 - MJ/Lista1.pdf", "Lista1.pdf", "pdf")), "Matemática Discreta");
     assert.equal(inferDisciplina(makeFile("/S05/EI - Eletronica Industrial/2021.1 - JB/Prova.pdf", "Prova.pdf", "pdf")), "Eletrônica Industrial");
-    assert.equal(inferDisciplina(makeFile("/S01/MCT - Metodologia Cientifica/2022.1 - PH/Trabalho.docx", "Trabalho.docx", "docx")), "Metodologia Científica");
+    assert.equal(inferDisciplina(makeFile("/S01/MCT - Metodologia Cientifica/2022.1 - PH/Trabalho.docx", "Trabalho.docx", "docx")), "Metodologia Científica e Tecnológica");
     assert.equal(inferDisciplina(makeFile("/S08/VC - Visao Computacional/2023.1 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Visão Computacional");
     assert.equal(inferDisciplina(makeFile("/S07/IHC - Interacao Humano Computador/2023.2 - PH/Trabalho.pdf", "Trabalho.pdf", "pdf")), "Interação Humano Computador");
     assert.equal(inferDisciplina(makeFile("/S08/PDI - Processamento Digital de Imagens/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Processamento Digital de Imagens");
@@ -43,7 +43,7 @@ test("expande dicionario de siglas", () => {
     assert.equal(inferDisciplina(makeFile("/S06/PO - Pesquisa e Ordenacao/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Pesquisa e Ordenação");
     assert.equal(inferDisciplina(makeFile("/S06/PEO - Pesquisa e Ordenacao/2023.2 - PH/Lista1.pdf", "Lista1.pdf", "pdf")), "Pesquisa e Ordenação");
     assert.equal(inferDisciplina(makeFile("/S08/IC - Inteligencia Computacional/2024.1 - PH/Projeto.pdf", "Projeto.pdf", "pdf")), "Inteligência Computacional");
-    assert.equal(inferDisciplina(makeFile("/S05/IAI - Introducao a Automacao Industrial/2023.1 - PH/Relatorio.pdf", "Relatorio.pdf", "pdf")), "Introdução à Automação Industrial");
+    assert.equal(inferDisciplina(makeFile("/S05/IAI - Introducao a Automacao Industrial/2023.1 - PH/Relatorio.pdf", "Relatorio.pdf", "pdf")), "Introdução à Automação Industrial e Controle");
     assert.equal(inferDisciplina(makeFile("/S09/EG - Empreendedorismo e Gestao/2024.2 - PH/Projeto.pdf", "Projeto.pdf", "pdf")), "Empreendedorismo e Gestão");
 });
 
@@ -570,7 +570,7 @@ test("ignora pasta de topico numerado e sobe para disciplina", () => {
         "Relatorio Final.docx",
         "docx",
     );
-    assert.equal(inferDisciplina(file), "Introdução à Automação Industrial");
+    assert.equal(inferDisciplina(file), "Introdução à Automação Industrial e Controle");
 });
 
 test("detecta sufixo numerico longo como garbage id", () => {
@@ -850,7 +850,7 @@ test("extrai disciplina do nome do repositorio quando aplicavel", () => {
         "repo.jpg",
         "jpg",
     );
-    assert.equal(inferDisciplina(file), "Introdução à Automação Industrial");
+    assert.equal(inferDisciplina(file), "Introdução à Automação Industrial e Controle");
 });
 
 test("preserva diacriticos maiusculos em titulos limpos", () => {
@@ -935,8 +935,11 @@ test("diferencia calculo por nivel no caminho", () => {
 });
 
 test("especializa fisica por semestre da grade", () => {
-    const file = makeFile("/S02/FE - Fisica/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf");
-    assert.equal(inferDisciplina(file), "Física II");
+    // FE em S02 → Física-Eletricidade; FE em S03 → Físico-Eletromagnetismo
+    const s02 = makeFile("/S02/FE - Fisica/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf");
+    assert.equal(inferDisciplina(s02), "Física-Eletricidade");
+    const s03 = makeFile("/S03/FE - Fisica/2024.1 - PH/Lista 1.pdf", "Lista 1.pdf", "pdf");
+    assert.equal(inferDisciplina(s03), "Físico-Eletromagnetismo");
 });
 
 test("prioriza resolucao para arquivos de ferramentas", () => {
