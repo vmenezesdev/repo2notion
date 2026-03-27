@@ -4,20 +4,20 @@ export type MigrationOptions = {}
  * A file in the repository scan result.
  */
 export type RepoFile = {
-    kind: "file";
-    name: string;
-    path: string;
-    extension: string;
+  kind: "file";
+  name: string;
+  path: string;
+  extension: string;
 }
 
 /**
  * A directory with nested children.
 */
 export type RepoDirectory = {
-    kind: "directory";
-    name: string;
-    path: string;
-    children: RepoNode[];
+  kind: "directory";
+  name: string;
+  path: string;
+  children: RepoNode[];
 }
 
 /**
@@ -26,13 +26,13 @@ export type RepoDirectory = {
 export type RepoNode = RepoFile | RepoDirectory;
 
 export type RecordCandidate = {
-    title: string;
-    sourcePath: string;
-    tipo?: string;
-    disciplina?: string;
-    semester?: string;
-    url?: string;
-    tags: string[];
+  title: string;
+  sourcePath: string;
+  tipo?: string;
+  disciplina?: string;
+  semester?: string;
+  url?: string;
+  tags: string[];
 }
 
 export type ConfidenceSource = "rule" | "ai";
@@ -49,9 +49,11 @@ export type RuleInference = {
 };
 
 export type RecordCandidateWithRefinedMetadata = RecordCandidate & {
-  score: number;
-  source: ConfidenceSource;
-  reasons: string[];
+  scoreMetadata: {
+    score: number;
+    source: ConfidenceSource;
+    reasons: string[];
+  }
 };
 
 

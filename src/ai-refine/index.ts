@@ -12,6 +12,48 @@ function normalizeComparable(value: string | null | undefined): string {
     return String(value).trim().toLowerCase();
 }
 
+async function retryWithExponentialBackoff<T>(
+    fn: () => Promise<T>,
+    options?: {
+        retries?: number;
+        baseDelayMs?: number;
+        maxDelayMs?: number;
+    },
+): Promise<T> {
+    const retries = options?.retries ?? 5;
+    const baseDelayMs = options?.baseDelayMs ?? 500;
+    const maxDelayMs = options?.maxDelayMs ?? 30_000;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+            return await fn();
+        } catch (err: any) {
+            const status = err?.status;
+            const code = err?.code;
+            const isRetryable =
+                status === 429 ||
+                (typeof status === "number" && status >= 500 && status < 600) ||
+                code === "ETIMEDOUT" ||
+                code === "ECONNRESET" ||
+                code === "ECONNREFUSED";
+
+            if (!isRetryable || attempt === retries) {
+                throw err;
+            }
+
+            const delay = Math.min(
+                maxDelayMs,
+                baseDelayMs * 2 ** attempt + Math.random() * 300,
+            );
+            console.warn(`Retryable error (attempt ${attempt + 1}/${retries}) - waiting ${Math.round(delay)}ms`, err?.message || err);
+            await wait(delay);
+        }
+    }
+
+    // should never reach here
+    return fn();
+}
+
 function isGenericDisciplina(value: string | null | undefined): boolean {
     if (!value) return true;
     const v = normalizeComparable(value);
@@ -164,36 +206,43 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
             fileData.mimeType = mimeType;
         }
 
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            config: {
-                responseJsonSchema: {
-                    type: "object",
-                    properties: {
-                        disciplina: { type: "string" },
-                        tipo: { type: "string" },
-                        semester: { type: "string" },
-                    },
-                    required: ["disciplina", "tipo", "semester"],
-                }
+        const response = await retryWithExponentialBackoff(() =>
+            ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                config: {
+                    responseJsonSchema: {
+                        type: "object",
+                        properties: {
+                            disciplina: { type: "string" },
+                            tipo: { type: "string" },
+                            semester: { type: "string" },
+                        },
+                        required: ["disciplina", "tipo", "semester"],
+                    }
+                },
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            {
+                                text: prompt
+                            },
+                            {
+                                text: JSON.stringify(file) // Enviar os dados do arquivo como parte do prompt para ajudar na inferência
+                            },
+                            {
+                                fileData
+                            }
+                        ]
+                    }
+                ]
+            }),
+            {
+                retries: 5,
+                baseDelayMs: 500,
+                maxDelayMs: 30_000,
             },
-            contents: [
-                {
-                    role: "user",
-                    parts: [
-                        {
-                            text: prompt
-                        },
-                        {
-                            text: JSON.stringify(file) // Enviar os dados do arquivo como parte do prompt para ajudar na inferência
-                        },
-                        {
-                            fileData
-                        }
-                    ]
-                }
-            ]
-        });
+        );
 
         const parsed = parseLLMResponse(response);
         return parsed;
@@ -252,9 +301,11 @@ export async function refineMetadata(
     if (!shouldUseAI(scored)) {
         return {
             ...raw,
-            score: scored.score,
-            source: "rule",
-            reasons: scored.reasons,
+            scoreMetadata: {
+                score: scored.score,
+                source: "rule",
+                reasons: scored.reasons,
+            },
         };
     }
 
@@ -272,12 +323,14 @@ export async function refineMetadata(
         disciplina: finalDisciplina ?? undefined,
         tipo: finalTipo ?? undefined,
         semester: finalSemester ?? undefined,
-        score: finalScore,
-        source: "ai",
-        reasons: [...scored.reasons, "ai fallback", ...(ai.disciplina ? [] : ["ai não sugeriu disciplina"])],
+        scoreMetadata: {
+            score: finalScore,
+            source: "ai",
+            reasons: [...scored.reasons, "ai fallback", ...(ai.disciplina ? [] : ["ai não sugeriu disciplina"])],
+        },
     };
 }
-
+    
 
 function fromExtensionToMime(extension: string): string | undefined {
     const ext = String(extension ?? "").trim().toLowerCase();
