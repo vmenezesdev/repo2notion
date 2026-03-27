@@ -24,6 +24,71 @@ function normalizeComparable(value: string | null | undefined): string {
     return String(value).trim().toLowerCase();
 }
 
+const MOJIBAKE_REPLACEMENTS: Array<[RegExp, string]> = [
+    [/Ã[_\s]cios/gi, "ícios"],
+    [/Ã[_\s]cio/gi, "ício"],
+    [/Ã§Ã£o/gi, "ção"],
+    [/Ã§Ã£/gi, "çã"],
+    [/Ã£o/gi, "ão"],
+    [/Ã_o/gi, "ão"],
+    [/Ã_n/gi, "ún"],
+    [/Ã_e/gi, "ê"],
+    [/Ã\^/gi, "ê"],
+    [/Ã\?/gi, "ó"],
+    [/Ã\(/gi, "ç"],
+    [/Ã\$/gi, "ú"],
+    [/Ã_/gi, "í"],
+    [/Ã\u00A0/g, "à"],
+    [/Ã /gi, "à"],
+    [/Ã¡/gi, "á"],
+    [/Ã¢/gi, "â"],
+    [/Ã£/gi, "ã"],
+    [/Ã©/gi, "é"],
+    [/Ãª/gi, "ê"],
+    [/Ã­/gi, "í"],
+    [/Ã³/gi, "ó"],
+    [/Ã´/gi, "ô"],
+    [/Ãµ/gi, "õ"],
+    [/Ãº/gi, "ú"],
+    [/Ã§/gi, "ç"],
+    [/Âº/g, "º"],
+    [/Âª/g, "ª"],
+    [/Â°/g, "°"],
+    [/Â(?=\s|$|[.,;:!?\)\]\}])/g, ""],
+];
+
+function hasMojibakeHints(value: string): boolean {
+    return /Ã[\u0080-\u00BF]/.test(value)
+        || /Â[\u0080-\u00BF]/.test(value)
+        || /Ã[_^?($]/.test(value)
+        || /�/.test(value);
+}
+
+function sanitizeAIText(value: unknown): string | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    let normalized = value.trim();
+    if (!normalized) {
+        return null;
+    }
+
+    if (hasMojibakeHints(normalized)) {
+        for (const [pattern, replacement] of MOJIBAKE_REPLACEMENTS) {
+            normalized = normalized.replace(pattern, replacement);
+        }
+    }
+
+    normalized = normalized
+        .normalize("NFKC")
+        .replace(/[_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    return normalized.length > 0 ? normalized : null;
+}
+
 function getPositiveIntFromEnv(value: string | undefined): number | null {
     if (!value) return null;
     const parsed = Number.parseInt(value, 10);
@@ -216,8 +281,10 @@ function shouldGenerateTitleWithAI(input: {
 }
 
 function normalizeSuggestedTitle(value: unknown): string | null {
-    if (typeof value !== "string") return null;
-    const normalized = value
+    const sanitized = sanitizeAIText(value);
+    if (!sanitized) return null;
+
+    const normalized = sanitized
         .replace(/\s+/g, " ")
         .replace(/\s*[-–—:]+\s*$/, "")
         .trim();
@@ -534,7 +601,13 @@ export async function refineMetadata(
         generateTitle: shouldGenerateTitle,
         rule: scored,
     });
-    const ai = await (options?.llmCaller ?? callLLM)(prompt, file);
+    const aiRaw = await (options?.llmCaller ?? callLLM)(prompt, file);
+    const ai = {
+        disciplina: sanitizeAIText(aiRaw.disciplina),
+        tipo: sanitizeAIText(aiRaw.tipo),
+        semester: sanitizeAIText(aiRaw.semester),
+        title: sanitizeAIText(aiRaw.title),
+    };
 
     const finalDisciplina = ai.disciplina ?? scored.disciplina;
     const finalTipo = ai.tipo ?? scored.tipo;
@@ -625,17 +698,11 @@ function parseLLMResponse(response: any): {
 
         const parsed = JSON.parse(raw);
 
-        const safeText = (value: unknown): string | null => {
-            if (typeof value !== "string") return null;
-            const normalized = value.trim();
-            return normalized.length > 0 ? normalized : null;
-        };
-
         return {
-            disciplina: safeText(parsed?.disciplina),
-            tipo: safeText(parsed?.tipo),
-            semester: safeText(parsed?.semester),
-            title: safeText(parsed?.title),
+            disciplina: sanitizeAIText(parsed?.disciplina),
+            tipo: sanitizeAIText(parsed?.tipo),
+            semester: sanitizeAIText(parsed?.semester),
+            title: sanitizeAIText(parsed?.title),
         };
     } catch (error) {
         console.error("Erro ao parsear resposta da LLM:", error);

@@ -170,3 +170,21 @@ test("refineMetadata mantém título quando IA devolve título fraco", async () 
   assert.notEqual(refined.title, "prova");
   assert.ok(!refined.scoreMetadata.reasons.includes("ai sugeriu título"));
 });
+
+test("refineMetadata corrige mojibake no título sugerido pela IA", async () => {
+  const file = makeFile("/S07/GR/Aula 15/15354113_10207630331179536.jpg", "15354113_10207630331179536.jpg", "jpg");
+  const refined = await refineMetadata(file, {
+    llmCaller: async () => ({
+      disciplina: "RegulaÃ§Ã£o",
+      tipo: "Lista de ExercÃ_cios",
+      semester: "2024.2",
+      title: "ExercÃ_cio_de_FixaÃ§Ã£o",
+    }),
+  });
+
+  assert.equal(refined.title, "Exercício de Fixação");
+  assert.equal(refined.disciplina, "Regulação");
+  assert.equal(refined.tipo, "Lista de Exercícios");
+  assert.equal(refined.scoreMetadata.source, "ai");
+  assert.ok(refined.scoreMetadata.reasons.includes("ai sugeriu título"));
+});

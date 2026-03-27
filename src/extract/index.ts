@@ -1,12 +1,100 @@
 import { RepoFile, RepoNode } from "../types";
 
+const IGNORED_FILE_NAMES = new Set([
+    ".ds_store",
+    "thumbs.db",
+    "desktop.ini",
+    ".replit",
+    "readme",
+    "readme.md",
+    "readme.txt",
+    "license",
+    "license.md",
+    ".gitignore",
+    ".gitattributes",
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "tsconfig.json",
+    "jsconfig.json",
+]);
+
+const IGNORED_EXTENSIONS = new Set([
+    "db",
+    "tmp",
+    "temp",
+    "bak",
+    "old",
+    "orig",
+    "swp",
+    "lock",
+    "exe",
+    "jar",
+    "o",
+    "obj",
+    "class",
+    "pdsbak",
+    "workspace",
+]);
+
+const IGNORED_PATH_MARKERS = [
+    "/node_modules/",
+    "/.vscode/",
+    "/.idea/",
+    "/dist/",
+    "/build/",
+    "/coverage/",
+    "/target/",
+    "/bin/",
+    "/obj/",
+    "/__pycache__/",
+    "/.venv/",
+    "/venv/",
+    "/incremental_db/",
+    "/output_files/",
+    "/db_info/",
+];
+
+function normalizeComparable(value: string): string {
+    return String(value ?? "")
+        .normalize("NFC")
+        .replace(/\\/g, "/")
+        .replace(/\/+/g, "/")
+        .toLowerCase();
+}
+
+function getComparableExtension(file: RepoFile): string {
+    const extension = String(file.extension ?? "").trim().toLowerCase();
+    if (extension) return extension;
+
+    const normalizedName = String(file.name ?? "").trim().toLowerCase();
+    const nameParts = normalizedName.split(".");
+    return nameParts.length > 1 ? nameParts[nameParts.length - 1] ?? "" : "";
+}
+
+function isIgnoredCollectedFile(file: RepoFile): boolean {
+    const comparableName = normalizeComparable(file.name);
+    if (IGNORED_FILE_NAMES.has(comparableName)) {
+        return true;
+    }
+
+    const comparableExtension = getComparableExtension(file);
+    if (IGNORED_EXTENSIONS.has(comparableExtension)) {
+        return true;
+    }
+
+    const comparablePath = normalizeComparable(file.path);
+    return IGNORED_PATH_MARKERS.some((marker) => comparablePath.includes(marker));
+}
+
 // RepoDirectory MigrationOptions -> MigrationPlan
 // Produz uma lista com todos os arquivos encontrados em um nó do repositório
 // Se o nó for um arquivo, devolve uma lista contendo somente esse arquivo
 // Se o nó for um diretório, devolve todos os arquivos de seus filhos recursivamente
 export function collectFiles(node: RepoNode): RepoFile[] {
     if (node?.kind === "file") {
-        return [node];
+        return isIgnoredCollectedFile(node) ? [] : [node];
     } else if (node?.kind === "directory") {
         return node.children.flatMap(collectFiles);
     } else {
@@ -29,11 +117,7 @@ export function removeGitPaths(files: RepoFile[]): RepoFile[] {
 }
 
 function normalizeComparablePath(path: string): string {
-    return String(path ?? "")
-        .normalize("NFC")
-        .replace(/\\/g, "/")
-        .replace(/\/+/g, "/")
-        .toLowerCase();
+    return normalizeComparable(path);
 }
 
 export function dedupeUnicodeEquivalentPaths(files: RepoFile[]): RepoFile[] {
