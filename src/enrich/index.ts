@@ -3103,9 +3103,11 @@ export function scoreRecordCandidate(rule: RecordCandidate): RecordCandidateWith
     }
     return {
         ...rule,
-        score,
-        source: "rule",
-        reasons: reasons,
+        scoreMetadata: {
+            score,
+            source: "rule",
+            reasons,
+        },
     };
 }
 

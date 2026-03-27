@@ -1,15 +1,72 @@
 import { parse, basename, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "crypto";
-import { createReadStream } from "fs";
+import { stat } from "node:fs/promises";
 import { inferMetadata } from "../enrich";
 import { RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile, RuleInference } from "../types";
-import { GenerateContentResponse, GoogleGenAI } from '@google/genai';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let aiClientPromise: Promise<any> | null = null;
+
+async function getAIClient(): Promise<any> {
+    if (!aiClientPromise) {
+        aiClientPromise = import("@google/genai").then(({ GoogleGenAI }) => {
+            return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        });
+    }
+    return aiClientPromise;
+}
+const DEFAULT_MAX_AI_FILE_BYTES = 20 * 1024 * 1024;
+const DEFAULT_MAX_AI_FILE_METADATA_CHARS = 1_500;
+const MAX_AI_FILE_BYTES = getPositiveIntFromEnv(process.env.AI_MAX_FILE_BYTES) ?? DEFAULT_MAX_AI_FILE_BYTES;
+const MAX_AI_FILE_METADATA_CHARS = getPositiveIntFromEnv(process.env.AI_MAX_FILE_METADATA_CHARS) ?? DEFAULT_MAX_AI_FILE_METADATA_CHARS;
 
 function normalizeComparable(value: string | null | undefined): string {
     if (!value) return "";
     return String(value).trim().toLowerCase();
+}
+
+function getPositiveIntFromEnv(value: string | undefined): number | null {
+    if (!value) return null;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+}
+
+function buildLLMFallbackResult(): { disciplina: string | null; tipo: string | null; semester: string | null } {
+    return {
+        disciplina: null,
+        tipo: null,
+        semester: null,
+    };
+}
+
+function isLikelyLLMInputLimitError(error: any): boolean {
+    const status = Number(error?.status ?? error?.error?.status ?? 0);
+    const code = normalizeComparable(String(error?.code ?? error?.error?.code ?? ""));
+    const message = normalizeComparable(
+        String(error?.message ?? error?.error?.message ?? ""),
+    );
+
+    if (status === 413) return true;
+
+    const mightBeInvalidArgument = status === 400 || code === "invalid_argument";
+    if (!mightBeInvalidArgument) return false;
+
+    const knownLimitHints = [
+        "page limit",
+        "too many pages",
+        "document contains",
+        "exceeds the supported",
+        "exceeds the maximum",
+        "too large",
+        "input too long",
+        "token limit",
+        "context window",
+        "request too large",
+        "payload too large",
+        "size limit",
+    ];
+
+    return knownLimitHints.some((hint) => message.includes(hint));
 }
 
 async function retryWithExponentialBackoff<T>(
@@ -191,7 +248,16 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
     // Use ai do Gemini
 
     try {
+        const ai = await getAIClient();
         const absolutePath = isAbsolute(file.path) ? file.path : resolve(process.cwd(), file.path);
+        const fileStats = await stat(absolutePath);
+        if (fileStats.size > MAX_AI_FILE_BYTES) {
+            console.warn(
+                `[ai-refine] AI skipped for ${file.path}: file size ${fileStats.size} bytes exceeds configured limit (${MAX_AI_FILE_BYTES} bytes).`,
+            );
+            return buildLLMFallbackResult();
+        }
+
         const mimeType = fromExtensionToMime(file.extension);
         const displayName = basename(file.path);
         const name = createUniqueUploadResourceName(displayName);
@@ -210,7 +276,7 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
             config: uploadConfig,
         });
 
-        await waitForActiveFile(uploadedFile);
+        await waitForActiveFile(ai, uploadedFile);
 
         const fileData: any = {
             fileUri: uploadedFile.uri,
@@ -242,7 +308,7 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
                                 text: prompt
                             },
                             {
-                                text: JSON.stringify(file) // Enviar os dados do arquivo como parte do prompt para ajudar na inferência
+                                text: JSON.stringify(file).slice(0, MAX_AI_FILE_METADATA_CHARS) // Enviar os dados do arquivo como parte do prompt para ajudar na inferência
                             },
                             {
                                 fileData
@@ -261,12 +327,13 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
         const parsed = parseLLMResponse(response);
         return parsed;
     } catch (error) {
+        if (isLikelyLLMInputLimitError(error)) {
+            console.warn(`[ai-refine] AI skipped for ${file.path}: input exceeds provider limits.`);
+            return buildLLMFallbackResult();
+        }
+
         console.error("Erro ao chamar LLM:", error);
-        return {
-            disciplina: null,
-            tipo: null,
-            semester: null,
-        };
+        return buildLLMFallbackResult();
     }
 }
 
@@ -289,7 +356,7 @@ export function computeFinalScore(
 export async function refineMetadata(
     file: RepoFile,
     options?: {
-        llmCaller?: (prompt: string) => Promise<{ disciplina: string | null; tipo: string | null; semester: string | null }>;
+        llmCaller?: (prompt: string, file: RepoFile) => Promise<{ disciplina: string | null; tipo: string | null; semester: string | null }>;
     },
 ): Promise<RecordCandidateWithRefinedMetadata> {
     const raw = inferMetadata(file) || {
@@ -394,7 +461,7 @@ function fromExtensionToMime(extension: string): string | undefined {
     }
 }
 
-function parseLLMResponse(response: GenerateContentResponse): {
+function parseLLMResponse(response: any): {
     disciplina: string | null;
     tipo: string | null;
     semester: string | null;
@@ -446,7 +513,7 @@ function createUniqueUploadResourceName(baseName: string): string {
     return `${prefix}-${randomSuffix}`;
 }
 
-async function waitForActiveFile(file) {
+async function waitForActiveFile(ai: any, file: any) {
     let attempts = 0;
     while (file.state !== "ACTIVE") {
         if (file.state === "FAILED") {

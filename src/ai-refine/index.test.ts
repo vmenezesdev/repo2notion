@@ -107,22 +107,28 @@ test("computeFinalScore preserva score quando IA não agrega sinais fortes", () 
 test("refineMetadata retorna source=rule para arquivo de alta confiança", async () => {
   const file = makeFile("/S01/CA - Calculo I/2020.1 - PH/P1.pdf", "P1.pdf", "pdf");
   const refined = await refineMetadata(file);
-  assert.equal(refined.source, "rule");
+  assert.equal(refined.scoreMetadata.source, "rule");
   assert.equal(refined.disciplina, "Calculo I");
   assert.equal(refined.tipo, "Prova");
   assert.equal(refined.semester, "2020.1");
 });
 
 test("refineMetadata retorna source=ai para baixa confiança (path genérico)", async () => {
-  const file = makeFile("/Outros/IMG_2026-03-25_14-10-04.jpg", "IMG_2026-03-25_14-10-04.jpg", "jpg");
-  const refined = await refineMetadata(file);
-  assert.equal(refined.source, "ai");
-  assert.ok(refined.score < 80);
-  assert.ok(refined.reasons.includes("ai fallback") || refined.reasons.includes("ai não sugeriu disciplina"));
+  const file = makeFile("/Outros/arquivo_generico_2026.pdf", "arquivo_generico_2026.pdf", "pdf");
+  const refined = await refineMetadata(file, {
+    llmCaller: async () => ({
+      disciplina: null,
+      tipo: null,
+      semester: null,
+    }),
+  });
+  assert.equal(refined.scoreMetadata.source, "ai");
+  assert.ok(refined.scoreMetadata.score < 80);
+  assert.ok(refined.scoreMetadata.reasons.includes("ai fallback") || refined.scoreMetadata.reasons.includes("ai não sugeriu disciplina"));
 });
 
 test("refineMetadata incorpora sugestão da IA quando disponível", async () => {
-  const file = makeFile("/Outros/IMG_2026-03-25_14-10-04.jpg", "IMG_2026-03-25_14-10-04.jpg", "jpg");
+  const file = makeFile("/Outros/arquivo_generico_2026.pdf", "arquivo_generico_2026.pdf", "pdf");
   const refined = await refineMetadata(file, {
     llmCaller: async () => ({
       disciplina: "Sistemas Operacionais",
@@ -131,11 +137,11 @@ test("refineMetadata incorpora sugestão da IA quando disponível", async () => 
     }),
   });
 
-  assert.equal(refined.source, "ai");
+  assert.equal(refined.scoreMetadata.source, "ai");
   assert.equal(refined.disciplina, "Sistemas Operacionais");
   assert.equal(refined.tipo, "Resumo");
   assert.equal(refined.semester, "2021.2");
-  assert.ok(refined.score > 0);
-  assert.ok(refined.reasons.includes("ai fallback"));
-  assert.ok(!refined.reasons.includes("ai não sugeriu disciplina"));
+  assert.ok(refined.scoreMetadata.score > 0);
+  assert.ok(refined.scoreMetadata.reasons.includes("ai fallback"));
+  assert.ok(!refined.scoreMetadata.reasons.includes("ai não sugeriu disciplina"));
 });
