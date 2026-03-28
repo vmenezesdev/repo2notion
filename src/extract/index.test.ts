@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { collectFiles, dedupeUnicodeEquivalentPaths } from "./index";
-import { RepoFile, RepoNode } from "../types";
+import { RepoFile, RepoNode, RepoNodeKind } from "../types";
 
 function makeFile(path: string, name: string, extension: string): RepoFile {
     return {
-        kind: "file",
+        kind: RepoNodeKind.FILE,
         path,
         name,
         extension,
+        children: [],
     };
 }
 
@@ -26,9 +27,10 @@ test("deduplica caminhos unicode equivalentes em NFC/NFD", () => {
 
 test("collectFiles ignora arquivos de sistema e compilação", () => {
     const tree: RepoNode = {
-        kind: "directory",
+        kind: RepoNodeKind.DIRECTORY,
         name: "",
         path: "/repo",
+        extension: "",
         children: [
             makeFile("/repo/Thumbs.db", "Thumbs.db", "db"),
             makeFile("/repo/projeto/main.o", "main.o", "o"),
@@ -45,9 +47,10 @@ test("collectFiles ignora arquivos de sistema e compilação", () => {
 
 test("collectFiles ignora arquivos de configuração comuns", () => {
     const tree: RepoNode = {
-        kind: "directory",
+        kind: RepoNodeKind.DIRECTORY,
         name: "",
         path: "/repo",
+        extension: "",
         children: [
             makeFile("/repo/README.md", "README.md", "md"),
             makeFile("/repo/.replit", ".replit", ""),

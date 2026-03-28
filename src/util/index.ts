@@ -10,7 +10,7 @@ export async function clearIntermediateResults(intermediateResults: string[] = [
     }
 }
 
-export async function saveIntermediateResult(filename: string, data: any) {
+export async function saveIntermediateResult(filename: string, data: unknown) {
     await writeFile(filename, JSON.stringify(data, null, 2), (err) => {
         if (err) {
             console.error(`Error writing ${filename} to file: `, err);

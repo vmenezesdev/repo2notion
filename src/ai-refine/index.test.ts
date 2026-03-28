@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RepoFile } from "../types";
+import { ConfidenceSource, RepoFile, RepoNodeKind } from "../types";
 import { computeFinalScore, computeRuleScore, refineMetadata, shouldUseAI } from "./index";
 
 function makeFile(path: string, name: string, extension: string): RepoFile {
-  return { kind: "file", path, name, extension };
+  return { kind: RepoNodeKind.FILE, path, name, extension, children: [] };
 }
 
 test("computeRuleScore chega a 100 em inferencia forte", () => {
@@ -13,8 +13,6 @@ test("computeRuleScore chega a 100 em inferencia forte", () => {
     disciplina: "Eletrônica Digital",
     tipo: "Prova",
     semester: "2022.1",
-    score: 0,
-    reasons: [],
   };
 
   const scored = computeRuleScore(rule);
@@ -30,8 +28,6 @@ test("computeRuleScore aplica penalidades e limita score mínimo em 0", () => {
     disciplina: "Geral",
     tipo: "Material Complementar",
     semester: "2026",
-    score: 0,
-    reasons: [],
   });
 
   assert.equal(scored.score, 0);
@@ -47,8 +43,6 @@ test("computeRuleScore reconhece semestre em formato de grade", () => {
     disciplina: "Estrutura de Dados",
     tipo: "Material de Aula",
     semester: "Grade S03",
-    score: 0,
-    reasons: [],
   });
 
   assert.equal(scored.score, 85);
@@ -56,24 +50,26 @@ test("computeRuleScore reconhece semestre em formato de grade", () => {
 });
 
 test("shouldUseAI retorna true para score baixo e false para score alto", () => {
-  const low = computeRuleScore({ title: "IMG_2024.jpg", disciplina: "Geral", tipo: "Material Complementar", semester: null, score: 0, reasons: [] });
+  const low = computeRuleScore({ title: "IMG_2024.jpg", disciplina: "Geral", tipo: "Material Complementar", semester: "" });
   assert.equal(shouldUseAI(low), true);
 
-  const high = computeRuleScore({ title: "CA - Prova 2018.1", disciplina: "Cálculo", tipo: "Prova", semester: "2018.1", score: 0, reasons: [] });
+  const high = computeRuleScore({ title: "CA - Prova 2018.1", disciplina: "Cálculo", tipo: "Prova", semester: "2018.1" });
   assert.equal(shouldUseAI(high), false);
 });
 
 test("shouldUseAI não usa IA para score alto mesmo com gatilho de título", () => {
-  const high = computeRuleScore({ title: "CA - Prova 2018.1", disciplina: "Cálculo", tipo: "Prova", semester: "2018.1", score: 0, reasons: [] });
+  const high = computeRuleScore({ title: "CA - Prova 2018.1", disciplina: "Cálculo", tipo: "Prova", semester: "2018.1" });
   assert.equal(shouldUseAI(high, { shouldGenerateTitle: true }), false);
 });
 
 test("shouldUseAI não usa IA quando disciplina está ausente mas score já é alto", () => {
   const highButNoDisciplina = {
     title: "Lista 2",
-    disciplina: null,
+    disciplina: "",
     tipo: "Lista de exercícios",
     semester: "2023.2",
+    sigla: "",
+    topics: [],
     score: 95,
     reasons: ["score sintético para validar regra"],
   };
@@ -87,6 +83,8 @@ test("computeFinalScore aplica bônus e limita em 100", () => {
     disciplina: "Eletrônica Digital",
     tipo: "Prova",
     semester: "2022.1",
+    sigla: "",
+    topics: [],
     score: 85,
     reasons: [],
   };
@@ -100,7 +98,9 @@ test("computeFinalScore preserva score quando IA não agrega sinais fortes", () 
     title: "Arquivo",
     disciplina: "Geral",
     tipo: "Desconhecido",
-    semester: null,
+    semester: "",
+    sigla: "",
+    topics: [],
     score: 42,
     reasons: [],
   };
@@ -112,7 +112,7 @@ test("computeFinalScore preserva score quando IA não agrega sinais fortes", () 
 test("refineMetadata retorna source=rule para arquivo de alta confiança", async () => {
   const file = makeFile("/S01/CA - Calculo I/2020.1 - PH/P1.pdf", "P1.pdf", "pdf");
   const refined = await refineMetadata(file);
-  assert.equal(refined.scoreMetadata.source, "rule");
+  assert.equal(refined.scoreMetadata.source, ConfidenceSource.RULE);
   assert.equal(refined.disciplina, "Calculo I");
   assert.equal(refined.tipo, "Prova");
   assert.equal(refined.semester, "2020.1");
@@ -122,13 +122,13 @@ test("refineMetadata retorna source=ai para baixa confiança (path genérico)", 
   const file = makeFile("/Outros/arquivo_generico_2026.pdf", "arquivo_generico_2026.pdf", "pdf");
   const refined = await refineMetadata(file, {
     llmCaller: async () => ({
-      disciplina: null,
-      tipo: null,
-      semester: null,
+      disciplina: "",
+      tipo: "",
+      semester: "",
       title: "arquivo_generico_2026",
     }),
   });
-  assert.equal(refined.scoreMetadata.source, "ai");
+  assert.equal(refined.scoreMetadata.source, ConfidenceSource.AI);
   assert.ok(refined.scoreMetadata.score < 80);
   assert.ok(refined.scoreMetadata.reasons.includes("ai fallback") || refined.scoreMetadata.reasons.includes("ai não sugeriu disciplina"));
 });
@@ -145,7 +145,7 @@ test("refineMetadata incorpora sugestão da IA quando disponível", async () => 
     }),
   });
 
-  assert.equal(refined.scoreMetadata.source, "ai");
+  assert.equal(refined.scoreMetadata.source, ConfidenceSource.AI);
   assert.equal(refined.disciplina, "Sistemas Operacionais");
   assert.equal(refined.tipo, "Resumo");
   assert.equal(refined.semester, "2021.2");
@@ -185,6 +185,6 @@ test("refineMetadata corrige mojibake no título sugerido pela IA", async () => 
   assert.equal(refined.title, "Exercício de Fixação");
   assert.equal(refined.disciplina, "Regulação");
   assert.equal(refined.tipo, "Lista de Exercícios");
-  assert.equal(refined.scoreMetadata.source, "ai");
+  assert.equal(refined.scoreMetadata.source, ConfidenceSource.AI);
   assert.ok(refined.scoreMetadata.reasons.includes("ai sugeriu título"));
 });

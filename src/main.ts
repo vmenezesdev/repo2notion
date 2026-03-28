@@ -6,11 +6,12 @@
 // 4. Upload files as attachments and link to original repo paths
 
 import "dotenv/config";
-import { MigrationOptions, MigrationResult, RepoFile } from "./types";
+import { MigrationOptions, MigrationResult, RecordCandidateWithRefinedMetadata, RepoFile } from "./types";
 import { scanRepository } from "./scan";
 import { clearIntermediateResults, saveIntermediateResult } from "./util";
 import { collectFiles, dedupeUnicodeEquivalentPaths, removeGitPaths, removeLfsPaths } from "./extract";
 import { refineMetadata } from "./ai-refine";
+import { exportToNotion } from "./notion";
 
 
 console.log("repo2notion starting...");
@@ -51,8 +52,8 @@ function getRefineBatchSize(totalFiles: number): number {
     return totalFiles > LARGE_REPO_FILE_COUNT ? DEFAULT_BATCH_SIZE_LARGE_REPO : DEFAULT_BATCH_SIZE;
 }
 
-async function refineFilesInBatches(files: RepoFile[], batchSize: number) {
-    const candidates = [];
+async function refineFilesInBatches(files: RepoFile[], batchSize: number) : Promise<RecordCandidateWithRefinedMetadata[]> {
+    const candidates : RecordCandidateWithRefinedMetadata[] = [];
 
     for (let i = 0; i < files.length; i += batchSize) {
         const chunk = files.slice(i, i + batchSize);
@@ -94,6 +95,7 @@ async function migrateRepo(rootPath: string, _options: MigrationOptions): Promis
             "goodCandidates.json",
             "badCandidates.json",
             "uncategorizedCandidates.json",
+            "oversizedFiles.json",
         ]
     );
     await saveIntermediateResult("repoTree.json", repoTree);
@@ -103,7 +105,9 @@ async function migrateRepo(rootPath: string, _options: MigrationOptions): Promis
     await saveIntermediateResult("badCandidates.json", badCandidates);
     await saveIntermediateResult("uncategorizedCandidates.json", uncategorizedCandidates);
 
-    // return result;
+    const oversizedFiles = await exportToNotion(goodCandidates);
+    console.log(`Files skipped due to 20 MB limit: ${oversizedFiles.length}`);
+    await saveIntermediateResult("oversizedFiles.json", oversizedFiles);
 
     return {};
 }

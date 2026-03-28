@@ -8,14 +8,15 @@ import {
     inferTipo,
     normalizeTitle,
 } from "./index";
-import { RepoFile } from "../types";
+import { RepoFile, RepoNodeKind } from "../types";
 
 function makeFile(path: string, name: string, extension: string): RepoFile {
     return {
-        kind: "file",
+        kind: RepoNodeKind.FILE,
         path,
         name,
         extension,
+        children: [],
     };
 }
 

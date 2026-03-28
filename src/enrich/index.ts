@@ -1,4 +1,4 @@
-import { RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile } from "../types";
+import { ConfidenceSource, RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile } from "../types";
 
 const NOISE_PATH_MARKERS = [
     "/.git/",
@@ -3105,7 +3105,7 @@ export function scoreRecordCandidate(rule: RecordCandidate): RecordCandidateWith
         ...rule,
         scoreMetadata: {
             score,
-            source: "rule",
+            source: ConfidenceSource.RULE,
             reasons,
         },
     };

@@ -1,4 +1,4 @@
-import { RepoFile, RepoNode } from "../types";
+import { RepoFile, RepoNode, RepoNodeKind } from "../types";
 
 const IGNORED_FILE_NAMES = new Set([
     ".ds_store",
@@ -93,9 +93,16 @@ function isIgnoredCollectedFile(file: RepoFile): boolean {
 // Se o nó for um arquivo, devolve uma lista contendo somente esse arquivo
 // Se o nó for um diretório, devolve todos os arquivos de seus filhos recursivamente
 export function collectFiles(node: RepoNode): RepoFile[] {
-    if (node?.kind === "file") {
-        return isIgnoredCollectedFile(node) ? [] : [node];
-    } else if (node?.kind === "directory") {
+    if (node.kind === RepoNodeKind.FILE) {
+        const file: RepoFile = {
+            kind: RepoNodeKind.FILE,
+            name: node.name,
+            path: node.path,
+            extension: node.extension,
+            children: [],
+        };
+        return isIgnoredCollectedFile(file) ? [] : [file];
+    } else if (node.kind === RepoNodeKind.DIRECTORY) {
         return node.children.flatMap(collectFiles);
     } else {
         return [];

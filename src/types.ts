@@ -1,31 +1,36 @@
-export type MigrationOptions = {}
+export interface MigrationOptions {}
+
+export enum RepoNodeKind {
+  FILE = "file",
+  DIRECTORY = "directory",
+}
 
 /**
  * A file in the repository scan result.
  */
-export type RepoFile = {
-  kind: "file";
+export interface RepoNode {
+  kind: RepoNodeKind;
   name: string;
   path: string;
   extension: string;
+  children: RepoNode[];
+}
+
+/**
+ * A file in the repository scan result.
+ */
+export interface RepoFile extends RepoNode {
+  kind: RepoNodeKind.FILE;
 }
 
 /**
  * A directory with nested children.
 */
-export type RepoDirectory = {
-  kind: "directory";
-  name: string;
-  path: string;
-  children: RepoNode[];
+export interface RepoDirectory extends RepoNode {
+  kind: RepoNodeKind.DIRECTORY;
 }
 
-/**
- * Node in repository tree scan result (file or directory).
- */
-export type RepoNode = RepoFile | RepoDirectory;
-
-export type RecordCandidate = {
+export interface RecordCandidate {
   title: string;
   sourcePath: string;
   tipo?: string;
@@ -35,26 +40,31 @@ export type RecordCandidate = {
   tags: string[];
 }
 
-export type ConfidenceSource = "rule" | "ai";
+export enum ConfidenceSource {
+  RULE = "rule",
+  AI = "ai",
+}
 
-export type RuleInference = {
-  disciplina: string | null;
-  tipo: string | null;
-  semester: string | null;
+export interface RuleInference {
+  disciplina: string;
+  tipo: string;
+  semester: string;
   title: string;
-  sigla?: string;
-  topics?: string[];
+  sigla: string;
+  topics: string[];
   score: number;
   reasons: string[];
-};
+}
 
-export type RecordCandidateWithRefinedMetadata = RecordCandidate & {
-  scoreMetadata: {
-    score: number;
-    source: ConfidenceSource;
-    reasons: string[];
-  }
-};
+export interface ScoreMetadata {
+  score: number;
+  source: ConfidenceSource;
+  reasons: string[];
+}
+
+export interface RecordCandidateWithRefinedMetadata extends RecordCandidate {
+  scoreMetadata: ScoreMetadata;
+}
 
 
-export type MigrationResult = {}
+export interface MigrationResult {}

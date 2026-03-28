@@ -2,14 +2,72 @@ import { parse, basename, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "crypto";
 import { stat } from "node:fs/promises";
 import { inferMetadata } from "../enrich";
-import { RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile, RuleInference } from "../types";
+import { ConfidenceSource, RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile, RuleInference } from "../types";
 
-let aiClientPromise: Promise<any> | null = null;
+type LLMInference = {
+    disciplina: string;
+    tipo: string;
+    semester: string;
+    title: string;
+};
 
-async function getAIClient(): Promise<any> {
+type UploadedFile = {
+    name: string;
+    uri: string;
+    state: string;
+    error?: string;
+    failureReason?: string;
+};
+
+type UploadConfig = {
+    name: string;
+    displayName: string;
+    mimeType?: string;
+};
+
+type UploadFileData = {
+    fileUri: string;
+    mimeType?: string;
+};
+
+type AIClient = {
+    files: {
+        upload(input: { file: string; config: UploadConfig }): Promise<UploadedFile>;
+        get(input: { name: string }): Promise<UploadedFile>;
+    };
+    models: {
+        generateContent(input: unknown): Promise<unknown>;
+    };
+};
+
+type ErrorLike = {
+    status?: number;
+    code?: string;
+    message?: string;
+    error?: ErrorLike;
+};
+
+type RuleScoreInput = {
+    disciplina?: string;
+    tipo?: string;
+    semester?: string;
+    title: string;
+};
+
+let aiClientPromise: Promise<AIClient> | null = null;
+
+function toRecord(value: unknown): Record<string, unknown> {
+    if (typeof value !== "object" || value === null) {
+        return {};
+    }
+    return value as Record<string, unknown>;
+}
+
+async function getAIClient(): Promise<AIClient> {
     if (!aiClientPromise) {
         aiClientPromise = import("@google/genai").then(({ GoogleGenAI }) => {
-            return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+            const GoogleGenAIConstructor = GoogleGenAI as unknown as new (config: { apiKey?: string }) => AIClient;
+            return new GoogleGenAIConstructor({ apiKey: process.env.GEMINI_API_KEY });
         });
     }
     return aiClientPromise;
@@ -97,20 +155,21 @@ function getPositiveIntFromEnv(value: string | undefined): number | null {
     return parsed;
 }
 
-function buildLLMFallbackResult(): { disciplina: string | null; tipo: string | null; semester: string | null; title: string | null } {
+function buildLLMFallbackResult(): LLMInference {
     return {
-        disciplina: null,
-        tipo: null,
-        semester: null,
-        title: null,
+        disciplina: "",
+        tipo: "",
+        semester: "",
+        title: "",
     };
 }
 
-function isLikelyLLMInputLimitError(error: any): boolean {
-    const status = Number(error?.status ?? error?.error?.status ?? 0);
-    const code = normalizeComparable(String(error?.code ?? error?.error?.code ?? ""));
+function isLikelyLLMInputLimitError(error: unknown): boolean {
+    const typedError = toRecord(error) as ErrorLike;
+    const status = Number(typedError.status ?? typedError.error?.status ?? 0);
+    const code = normalizeComparable(String(typedError.code ?? typedError.error?.code ?? ""));
     const message = normalizeComparable(
-        String(error?.message ?? error?.error?.message ?? ""),
+        String(typedError.message ?? typedError.error?.message ?? ""),
     );
 
     if (status === 413) return true;
@@ -151,9 +210,10 @@ async function retryWithExponentialBackoff<T>(
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         try {
             return await fn();
-        } catch (err: any) {
-            const status = err?.status;
-            const code = err?.code;
+        } catch (err: unknown) {
+            const typedError = toRecord(err) as ErrorLike;
+            const status = typedError.status;
+            const code = typedError.code;
             const isRetryable =
                 status === 429 ||
                 (typeof status === "number" && status >= 500 && status < 600) ||
@@ -169,7 +229,7 @@ async function retryWithExponentialBackoff<T>(
                 maxDelayMs,
                 baseDelayMs * 2 ** attempt + Math.random() * 300,
             );
-            console.warn(`Retryable error (attempt ${attempt + 1}/${retries}) - waiting ${Math.round(delay)}ms`, err?.message || err);
+            console.warn(`Retryable error (attempt ${attempt + 1}/${retries}) - waiting ${Math.round(delay)}ms`, typedError.message ?? String(err));
             await wait(delay);
         }
     }
@@ -323,11 +383,11 @@ const WELL_KNOWN_TIPOS = new Set([
     "material complementar",
 ]);
 
-export function computeRuleScore(rule: RuleInference | RecordCandidate): RuleInference & { score: number; reasons: string[] } {
-    const disciplina = normalizeComparable((rule as any).disciplina ?? "");
-    const tipo = normalizeComparable((rule as any).tipo ?? "");
-    const semester = normalizeComparable((rule as any).semester ?? "");
-    const title = normalizeComparable((rule as any).title ?? "");
+export function computeRuleScore(rule: RuleScoreInput): RuleInference {
+    const disciplina = normalizeComparable(rule.disciplina ?? "");
+    const tipo = normalizeComparable(rule.tipo ?? "");
+    const semester = normalizeComparable(rule.semester ?? "");
+    const title = normalizeComparable(rule.title ?? "");
 
     let score = 0;
     const reasons: string[] = [];
@@ -355,12 +415,12 @@ export function computeRuleScore(rule: RuleInference | RecordCandidate): RuleInf
         reasons.push("grade de semestre");
     }
 
-    if (isGenericImageName((rule as any).title)) {
+    if (isGenericImageName(rule.title)) {
         score -= 20;
         reasons.push("nome de imagem genérico");
     }
 
-    if (isLikelyWeakTitle((rule as any).title)) {
+    if (isLikelyWeakTitle(rule.title)) {
         score -= 20;
         reasons.push("título fraco");
     }
@@ -373,18 +433,19 @@ export function computeRuleScore(rule: RuleInference | RecordCandidate): RuleInf
     const bounded = Math.max(0, Math.min(100, score));
 
     return {
-        ...rule,
+        title: rule.title ?? "",
         score: bounded,
         reasons,
-        disciplina: (rule as any).disciplina ?? null,
-        tipo: (rule as any).tipo ?? null,
-        semester: (rule as any).semester ?? null,
-        title: (rule as any).title ?? "",
+        disciplina: rule.disciplina ?? "",
+        tipo: rule.tipo ?? "",
+        semester: rule.semester ?? "",
+        sigla: "",
+        topics: [],
     };
 }
 
 export function shouldUseAI(
-    scored: RuleInference & { score: number; reasons: string[] },
+    scored: RuleInference,
     _options?: { shouldGenerateTitle?: boolean },
 ): boolean {
     const configuredThreshold =
@@ -405,7 +466,7 @@ export function buildAIPrompt(input: {
     extension: string;
     title: string;
     generateTitle: boolean;
-    rule: RuleInference & { score: number; reasons: string[] };
+    rule: RuleInference;
 }): string {
     return `A partir deste arquivo, identifique disciplina, tipo e semestre com o máximo de precisão.
 Também analise se deve propor um título humano e descritivo para o campo "title".
@@ -432,7 +493,7 @@ Use null para disciplina/tipo/semester quando não souber. O campo title deve se
 `;
 }
 
-export async function callLLM(prompt: string, file: RepoFile): Promise<{ disciplina: string | null; tipo: string | null; semester: string | null; title: string | null }> {
+export async function callLLM(prompt: string, file: RepoFile): Promise<LLMInference> {
     // Stub local. Substitua por chamada real ao seu LLM preferido.
     // Use ai do Gemini
 
@@ -451,7 +512,7 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
         const displayName = basename(file.path);
         const name = createUniqueUploadResourceName(displayName);
 
-        const uploadConfig: any = {
+        const uploadConfig: UploadConfig = {
             name,
             displayName,
         };
@@ -467,7 +528,7 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
 
         await waitForActiveFile(ai, uploadedFile);
 
-        const fileData: any = {
+        const fileData: UploadFileData = {
             fileUri: uploadedFile.uri,
         };
 
@@ -531,10 +592,10 @@ export async function callLLM(prompt: string, file: RepoFile): Promise<{ discipl
 }
 
 export function computeFinalScore(
-    disciplina: string | null,
-    tipo: string | null,
-    semester: string | null,
-    base: RuleInference & { score: number; reasons: string[] },
+    disciplina: string,
+    tipo: string,
+    semester: string,
+    base: RuleInference,
 ): number {
     let final = base.score;
 
@@ -549,23 +610,25 @@ export function computeFinalScore(
 export async function refineMetadata(
     file: RepoFile,
     options?: {
-        llmCaller?: (prompt: string, file: RepoFile) => Promise<{ disciplina: string | null; tipo: string | null; semester: string | null; title: string | null }>;
+        llmCaller?: (prompt: string, file: RepoFile) => Promise<LLMInference>;
     },
 ): Promise<RecordCandidateWithRefinedMetadata> {
     const raw = inferMetadata(file) || {
         title: file.name,
         sourcePath: file.path,
-        tipo: null,
-        disciplina: null,
-        semester: null,
+        tipo: "",
+        disciplina: "",
+        semester: "",
         tags: [],
     };
 
     const base: RuleInference = {
         title: raw.title,
-        disciplina: raw.disciplina ?? null,
-        tipo: raw.tipo ?? null,
-        semester: raw.semester ?? null,
+        disciplina: raw.disciplina ?? "",
+        tipo: raw.tipo ?? "",
+        semester: raw.semester ?? "",
+        sigla: "",
+        topics: [],
         score: 0,
         reasons: [],
     };
@@ -582,7 +645,7 @@ export async function refineMetadata(
             ...raw,
             scoreMetadata: {
                 score: scored.score,
-                source: "rule",
+                source: ConfidenceSource.RULE,
                 reasons: scored.reasons,
             },
         };
@@ -594,7 +657,7 @@ export async function refineMetadata(
             ...raw,
             scoreMetadata: {
                 score: scored.score,
-                source: "rule",
+                source: ConfidenceSource.RULE,
                 reasons: [...scored.reasons, "skipped unsupported file type"],
             },
         };
@@ -610,34 +673,34 @@ export async function refineMetadata(
     });
     const aiRaw = await (options?.llmCaller ?? callLLM)(prompt, file);
     const ai = {
-        disciplina: sanitizeAIText(aiRaw.disciplina),
-        tipo: sanitizeAIText(aiRaw.tipo),
-        semester: sanitizeAIText(aiRaw.semester),
-        title: sanitizeAIText(aiRaw.title),
+        disciplina: sanitizeAIText(aiRaw.disciplina) ?? "",
+        tipo: sanitizeAIText(aiRaw.tipo) ?? "",
+        semester: sanitizeAIText(aiRaw.semester) ?? "",
+        title: sanitizeAIText(aiRaw.title) ?? "",
     };
 
-    const finalDisciplina = ai.disciplina ?? scored.disciplina;
-    const finalTipo = ai.tipo ?? scored.tipo;
-    const finalSemester = ai.semester ?? scored.semester;
-    const normalizedSuggestedTitle = normalizeSuggestedTitle(ai.title);
+    const finalDisciplina = ai.disciplina || scored.disciplina;
+    const finalTipo = ai.tipo || scored.tipo;
+    const finalSemester = ai.semester || scored.semester;
+    const normalizedSuggestedTitle = normalizeSuggestedTitle(ai.title) ?? "";
     const shouldApplySuggestedTitle = shouldGenerateTitle && isAcceptableSuggestedTitle(normalizedSuggestedTitle, raw.title);
-    const finalTitle = shouldApplySuggestedTitle ? normalizedSuggestedTitle! : raw.title;
+    const finalTitle = shouldApplySuggestedTitle ? normalizedSuggestedTitle : raw.title;
 
     const finalScore = computeFinalScore(finalDisciplina, finalTipo, finalSemester, scored);
 
     return {
         ...raw,
         title: finalTitle,
-        disciplina: finalDisciplina ?? undefined,
-        tipo: finalTipo ?? undefined,
-        semester: finalSemester ?? undefined,
+        disciplina: finalDisciplina || undefined,
+        tipo: finalTipo || undefined,
+        semester: finalSemester || undefined,
         scoreMetadata: {
             score: finalScore,
-            source: "ai",
+            source: ConfidenceSource.AI,
             reasons: [
                 ...scored.reasons,
                 "ai fallback",
-                ...(ai.disciplina ? [] : ["ai não sugeriu disciplina"]),
+                ...(ai.disciplina.length > 0 ? [] : ["ai não sugeriu disciplina"]),
                 ...(shouldApplySuggestedTitle ? ["ai sugeriu título"] : []),
             ],
         },
@@ -681,44 +744,45 @@ function fromExtensionToMime(extension: string): string | undefined {
     }
 }
 
-function parseLLMResponse(response: any): {
-    disciplina: string | null;
-    tipo: string | null;
-    semester: string | null;
-    title: string | null;
-} {
+function parseLLMResponse(response: unknown): LLMInference {
     try {
-        const content = response.candidates[0]?.content;
-        if (!content) {
+        const responseRecord = toRecord(response);
+        const candidatesRaw = responseRecord.candidates;
+        const candidates = Array.isArray(candidatesRaw) ? candidatesRaw : [];
+        const firstCandidate = toRecord(candidates[0]);
+        const content = toRecord(firstCandidate.content);
+        const partsRaw = content.parts;
+        const parts = Array.isArray(partsRaw) ? partsRaw : [];
+
+        if (parts.length === 0) {
             throw new Error("Resposta da LLM não contém conteúdo");
         }
-        const textPart = content.parts.find(part => "text" in part) as { text: string } | undefined;
+
+        const textPart = parts
+            .map((part) => toRecord(part))
+            .find((part) => typeof part.text === "string");
+
         if (!textPart) {
             throw new Error("Resposta da LLM não contém parte de texto");
         }
 
-        let raw = String(textPart.text || "").trim();
+        let raw = String(textPart.text ?? "").trim();
         const fencedMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
         if (fencedMatch) {
             raw = fencedMatch[1].trim();
         }
 
-        const parsed = JSON.parse(raw);
+        const parsed = toRecord(JSON.parse(raw));
 
         return {
-            disciplina: sanitizeAIText(parsed?.disciplina),
-            tipo: sanitizeAIText(parsed?.tipo),
-            semester: sanitizeAIText(parsed?.semester),
-            title: sanitizeAIText(parsed?.title),
+            disciplina: sanitizeAIText(parsed.disciplina) ?? "",
+            tipo: sanitizeAIText(parsed.tipo) ?? "",
+            semester: sanitizeAIText(parsed.semester) ?? "",
+            title: sanitizeAIText(parsed.title) ?? "",
         };
     } catch (error) {
         console.error("Erro ao parsear resposta da LLM:", error);
-        return {
-            disciplina: null,
-            tipo: null,
-            semester: null,
-            title: null,
-        };
+        return buildLLMFallbackResult();
     }
 }
 
@@ -742,7 +806,7 @@ function createUniqueUploadResourceName(baseName: string): string {
     return `${prefix}-${randomSuffix}`;
 }
 
-async function waitForActiveFile(ai: any, file: any) {
+async function waitForActiveFile(ai: AIClient, file: UploadedFile): Promise<void> {
     let attempts = 0;
     while (file.state !== "ACTIVE") {
         if (file.state === "FAILED") {
@@ -759,7 +823,6 @@ async function waitForActiveFile(ai: any, file: any) {
         await wait(5_000); // non‑blocking delay
         file = await ai.files.get({ name: file.name });
     }
-    return file;
 }
 
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
