@@ -50,7 +50,7 @@ async function computeFileHash(filePath: string): Promise<string> {
     return createHash("sha256").update(content).digest("hex");
 }
 
-async function isPageAlreadyUploaded(dataSourceId: string, idempotencyKey: string): Promise<boolean> {
+async function isPageAlreadyUploaded(dataSourceId: string, idempotencyKey: string, originalPath: string): Promise<boolean> {
     if (createdIdempotencyKeys.has(idempotencyKey)) {
         return true;
     }
@@ -142,7 +142,7 @@ export async function exportToNotion(
         try {
             const idempotencyKey = await computeFileHash(candidate.sourcePath);
 
-            const exists = await isPageAlreadyUploaded(datasourceId, idempotencyKey);
+            const exists = await isPageAlreadyUploaded(datasourceId, idempotencyKey, candidate.sourcePath);
             if (exists) {
                 console.info(`Skipping upload for ${candidate.sourcePath}: idempotency key already exists.`);
                 continue;
@@ -204,6 +204,99 @@ export async function getDatasource() {
             return null; // Data source not found
         }
         return dataSource;
+    }
+}
+
+export async function fixEmptyOriginalPath(pageCandidates: RecordCandidateWithRefinedMetadata[]) {
+    const datasource = await getDatasource();
+    const datasourceId = datasource?.id;
+
+    if (!datasourceId) {
+        console.error("No data source found in Notion database");
+        return [];
+    }
+
+
+    let problematicRows: {
+        pageId: string,
+        idempotencyKey: string
+    }[] = [];
+
+    let cursor = undefined;
+
+    do {
+        let page = await notion.dataSources.query({
+            data_source_id: datasourceId,
+            start_cursor: cursor,
+            filter: {
+                and: [
+                    {
+                        property: "IdempotencyKey",
+                        rich_text: {
+                            is_not_empty: true
+                        },
+                    },
+                    {
+                        property: "OriginalPath",
+                        rich_text: {
+                            is_empty: true
+                        },
+                    }
+                ]
+            }
+        })
+
+        problematicRows = problematicRows.concat(
+            page.results
+                // todo: study this particular typescript snippet
+                .filter((r): r is Extract<typeof r, { properties: unknown }> => "properties" in r)
+                .map((r) => ({
+                    pageId: r.id,
+                    idempotencyKey: (r.properties as any).IdempotencyKey.rich_text[0].text.content,
+                }))
+        );
+
+        cursor = page.next_cursor;
+    } while (cursor);
+
+    // Reset rate-limit state so accumulated test runs (or prior invocations) don't
+    // cause spurious sleeps. Each export run starts its own fresh 2 req/s window.
+    lastRequestTime = 0;
+
+    if (!datasourceId) {
+        console.error("No data source found in Notion database");
+        return [];
+    }
+
+    const idempotencyKeyToPageId = Object.fromEntries(problematicRows.map(r => [r.idempotencyKey, r.pageId]));
+
+    for (const candidate of pageCandidates) {
+        try {
+            const idempotencyKey = await computeFileHash(candidate.sourcePath);
+
+            if (idempotencyKey in idempotencyKeyToPageId) {
+                await withRetry(() => notion.pages.update({
+                    page_id: idempotencyKeyToPageId[idempotencyKey],
+                    properties: {
+                        OriginalPath: {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {
+                                        "content": candidate.sourcePath,
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }));
+            }
+
+            // await withRetry(() => notion.pages.create(payload));
+            // createdIdempotencyKeys.add(idempotencyKey);
+        } catch (error) {
+            console.error(`Failed to create Notion page for ${candidate.sourcePath}:`, error);
+        }
     }
 }
 

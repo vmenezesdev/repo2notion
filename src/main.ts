@@ -11,7 +11,9 @@ import { scanRepository } from "./scan";
 import { clearIntermediateResults, saveIntermediateResult } from "./util";
 import { collectFiles, dedupeUnicodeEquivalentPaths, removeGitPaths, removeLfsPaths } from "./extract";
 import { refineMetadata } from "./ai-refine";
-import { exportToNotion } from "./notion";
+import { exportToNotion, fixEmptyOriginalPath } from "./notion";
+import { readFileSync } from "fs";
+import { stringify } from "querystring";
 
 
 console.log("repo2notion starting...");
@@ -52,8 +54,8 @@ function getRefineBatchSize(totalFiles: number): number {
     return totalFiles > LARGE_REPO_FILE_COUNT ? DEFAULT_BATCH_SIZE_LARGE_REPO : DEFAULT_BATCH_SIZE;
 }
 
-async function refineFilesInBatches(files: RepoFile[], batchSize: number) : Promise<RecordCandidateWithRefinedMetadata[]> {
-    const candidates : RecordCandidateWithRefinedMetadata[] = [];
+async function refineFilesInBatches(files: RepoFile[], batchSize: number): Promise<RecordCandidateWithRefinedMetadata[]> {
+    const candidates: RecordCandidateWithRefinedMetadata[] = [];
 
     for (let i = 0; i < files.length; i += batchSize) {
         const chunk = files.slice(i, i + batchSize);
@@ -105,9 +107,11 @@ async function migrateRepo(rootPath: string, _options: MigrationOptions): Promis
     await saveIntermediateResult("badCandidates.json", badCandidates);
     await saveIntermediateResult("uncategorizedCandidates.json", uncategorizedCandidates);
 
-    const oversizedFiles = await exportToNotion(goodCandidates);
+    const oversizedFiles = await exportToNotion(recordCandidates);
     console.log(`Files skipped due to 20 MB limit: ${oversizedFiles.length}`);
     await saveIntermediateResult("oversizedFiles.json", oversizedFiles);
+
+    await fixEmptyOriginalPath(recordCandidates);
 
     return {};
 }
@@ -115,7 +119,6 @@ async function migrateRepo(rootPath: string, _options: MigrationOptions): Promis
 (async () => {
     await migrateRepo(targetDir, {});
 })();
-
 
 // In order to track progress we will save the directory strucutre in a local file
 

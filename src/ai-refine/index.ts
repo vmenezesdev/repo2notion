@@ -4,6 +4,8 @@ import { stat } from "node:fs/promises";
 import { inferMetadata } from "../enrich";
 import { ConfidenceSource, RecordCandidate, RecordCandidateWithRefinedMetadata, RepoFile, RuleInference } from "../types";
 
+const AI_ENABLED = false;
+
 type LLMInference = {
     disciplina: string;
     tipo: string;
@@ -448,16 +450,21 @@ export function shouldUseAI(
     scored: RuleInference,
     _options?: { shouldGenerateTitle?: boolean },
 ): boolean {
-    const configuredThreshold =
-        getPositiveIntFromEnv(process.env.AI_SCORE_THRESHOLD)
-        ?? getPositiveIntFromEnv(process.env.SCORE_THRESHOLD)
-        ?? DEFAULT_AI_SCORE_THRESHOLD;
 
-    const threshold = Math.max(1, Math.min(100, configuredThreshold));
+    if (AI_ENABLED) {
+        const configuredThreshold =
+            getPositiveIntFromEnv(process.env.AI_SCORE_THRESHOLD)
+            ?? getPositiveIntFromEnv(process.env.SCORE_THRESHOLD)
+            ?? DEFAULT_AI_SCORE_THRESHOLD;
 
-    if (scored.score < threshold) return true;
+        const threshold = Math.max(1, Math.min(100, configuredThreshold));
 
-    return false;
+        if (scored.score < threshold) return true;
+
+        return false;
+    }
+
+    return false
 }
 
 export function buildAIPrompt(input: {
@@ -706,7 +713,7 @@ export async function refineMetadata(
         },
     };
 }
-    
+
 
 function fromExtensionToMime(extension: string): string | undefined {
     const ext = String(extension ?? "").trim().toLowerCase();
