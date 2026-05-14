@@ -93,7 +93,7 @@ npm run dev
 - File size limits for uploads (5MB for free accounts, 100MB for paid)
 
 ## Intermediate outputs
-Durante a execução o pipeline gera arquivos intermediários para auditoria local:
+During execution, the pipeline generates intermediate files for local auditing:
 - `repoTree.json`
 - `files.json`
 - `recordCandidates.json`
